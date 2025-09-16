@@ -8,9 +8,14 @@ import {
   faChartLine, 
   faCog,
   faBars,
-  faTimes
+  faTimes,
+  faBell
 } from '@fortawesome/free-solid-svg-icons';
 import Transaction from './transaction';
+import Budget from './budget';
+import Report from './Report';
+import Settings from './Settings';
+import Notifications from './Notifications';
 
 const LandingPage = ({ onLogout }) => {
   const [userData, setUserData] = useState(null);
@@ -44,6 +49,22 @@ const LandingPage = ({ onLogout }) => {
     setActiveTransactionTab(tabType);
   };
 
+  const handleNavigateToBudget = () => {
+    setCurrentPage('budget');
+  };
+
+  const handleNavigateToReports = () => {
+    setCurrentPage('reports');
+  };
+
+  const handleNavigateToSettings = () => {
+    setCurrentPage('settings');
+  };
+
+  const handleNavigateToNotifications = () => {
+    setCurrentPage('notifications');
+  };
+
   const handleBackToLanding = () => {
     setCurrentPage('dashboard');
     setActiveTransactionTab(null); // Reset to no tab selected
@@ -52,6 +73,26 @@ const LandingPage = ({ onLogout }) => {
   // If transaction page should be shown, render it instead
   if (currentPage === 'transactions') {
     return <Transaction onBackToLanding={handleBackToLanding} initialTab={activeTransactionTab} />;
+  }
+
+  // If budget page should be shown, render it instead
+  if (currentPage === 'budget') {
+    return <Budget onBackToLanding={handleBackToLanding} />;
+  }
+
+  // If reports page should be shown, render it instead
+  if (currentPage === 'reports') {
+    return <Report onBackToLanding={handleBackToLanding} />;
+  }
+
+  // If settings page should be shown, render it instead
+  if (currentPage === 'settings') {
+    return <Settings onBackToLanding={handleBackToLanding} />;
+  }
+
+  // If notifications page should be shown, render it instead
+  if (currentPage === 'notifications') {
+    return <Notifications onBackToLanding={handleBackToLanding} />;
   }
 
   return (
@@ -73,6 +114,18 @@ const LandingPage = ({ onLogout }) => {
             
             {/* Desktop Navigation */}
             <div className="hidden md:flex items-center space-x-4 lg:space-x-6">
+              {/* Notification Bell */}
+              <button
+                onClick={handleNavigateToNotifications}
+                className="relative p-2 text-violet-600 hover:text-violet-700 hover:bg-violet-100 rounded-lg transition duration-200"
+              >
+                <FontAwesomeIcon icon={faBell} className="h-6 w-6" />
+                {/* Notification Badge */}
+                <span className="absolute -top-1 -right-1 inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-red-600 rounded-full">
+                  3
+                </span>
+              </button>
+
               <div className="flex items-center space-x-2 lg:space-x-3">
                 <FontAwesomeIcon icon={faUser} className="h-5 w-5 lg:h-6 lg:w-6 text-violet-600" />
                 <span className="text-violet-700 font-medium text-sm lg:text-lg max-w-32 lg:max-w-none truncate">
@@ -107,6 +160,16 @@ const LandingPage = ({ onLogout }) => {
           {isMobileMenuOpen && (
             <div className="md:hidden border-t border-violet-200 bg-white">
               <div className="px-2 pt-2 pb-3 space-y-1">
+                <button
+                  onClick={handleNavigateToNotifications}
+                  className="w-full flex items-center px-3 py-2 text-base font-medium text-violet-700 hover:bg-violet-100 rounded-md transition duration-200"
+                >
+                  <FontAwesomeIcon icon={faBell} className="h-5 w-5 mr-3" />
+                  Notifications
+                  <span className="ml-auto inline-flex items-center justify-center px-2 py-1 text-xs font-bold leading-none text-white bg-red-600 rounded-full">
+                    3
+                  </span>
+                </button>
                 <div className="flex items-center px-3 py-2 text-violet-700">
                   <FontAwesomeIcon icon={faUser} className="h-5 w-5 mr-3 text-violet-600" />
                   <span className="font-medium truncate">
@@ -257,17 +320,26 @@ const LandingPage = ({ onLogout }) => {
                 <div className="text-base md:text-lg font-semibold text-red-900">Add Expense</div>
               </button>
               
-              <button className="bg-blue-50 hover:bg-blue-100 p-4 md:p-6 lg:p-8 rounded-xl border border-blue-200 transition duration-200 transform hover:scale-105">
+              <button 
+                onClick={handleNavigateToReports}
+                className="bg-blue-50 hover:bg-blue-100 p-4 md:p-6 lg:p-8 rounded-xl border border-blue-200 transition duration-200 transform hover:scale-105"
+              >
                 <FontAwesomeIcon icon={faChartLine} className="h-8 w-8 md:h-10 md:w-10 text-blue-600 mb-3 md:mb-4" />
                 <div className="text-base md:text-lg font-semibold text-blue-900">View Reports</div>
               </button>
               
-              <button className="bg-yellow-50 hover:bg-yellow-100 p-4 md:p-6 lg:p-8 rounded-xl border border-yellow-200 transition duration-200 transform hover:scale-105">
+              <button 
+                onClick={handleNavigateToBudget}
+                className="bg-yellow-50 hover:bg-yellow-100 p-4 md:p-6 lg:p-8 rounded-xl border border-yellow-200 transition duration-200 transform hover:scale-105"
+              >
                 <FontAwesomeIcon icon={faWallet} className="h-8 w-8 md:h-10 md:w-10 text-yellow-600 mb-3 md:mb-4" />
                 <div className="text-base md:text-lg font-semibold text-yellow-900">Set Budget</div>
               </button>
               
-              <button className="bg-gray-50 hover:bg-gray-100 p-4 md:p-6 lg:p-8 rounded-xl border border-gray-200 transition duration-200 transform hover:scale-105">
+              <button 
+                onClick={handleNavigateToSettings}
+                className="bg-gray-50 hover:bg-gray-100 p-4 md:p-6 lg:p-8 rounded-xl border border-gray-200 transition duration-200 transform hover:scale-105"
+              >
                 <FontAwesomeIcon icon={faCog} className="h-8 w-8 md:h-10 md:w-10 text-gray-600 mb-3 md:mb-4" />
                 <div className="text-base md:text-lg font-semibold text-gray-900">Settings</div>
               </button>

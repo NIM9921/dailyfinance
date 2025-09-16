@@ -54,6 +54,7 @@ app.use('/api', require('./routes/auth')); // This will handle /api/register
 app.use('/api/auth', require('./routes/auth'));
 app.use('/api/transactions', require('./routes/transactions'));
 app.use('/api/categories', require('./routes/categories'));
+app.use('/api/budgets', require('./routes/budgetRoutes'));
 
 // Error handling middleware
 app.use((err, req, res, next) => {

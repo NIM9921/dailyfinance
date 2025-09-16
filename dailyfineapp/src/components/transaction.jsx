@@ -24,8 +24,13 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
+  const [currency, setCurrency] = useState('₹');
 
   useEffect(() => {
+    // Load saved currency preference
+    const savedCurrency = localStorage.getItem('selectedCurrency') || '₹';
+    setCurrency(savedCurrency);
+    
     setFormData(prev => ({
       ...prev,
       title: activeTab === 'income' ? 'Income' : 'Expenses',
@@ -106,6 +111,23 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
     try {
       console.log('Sending transaction data:', JSON.stringify(transactionData, null, 2));
 
+      // Get user data for budget update
+      const storedUserData = localStorage.getItem('userData');
+      const storedToken = localStorage.getItem('authToken');
+      let userId = null;
+
+      if (storedUserData) {
+        const user = JSON.parse(storedUserData);
+        userId = user.id || user.data?.id || user._id;
+      } else if (storedToken) {
+        try {
+          const tokenPayload = JSON.parse(atob(storedToken.split('.')[1]));
+          userId = tokenPayload.userId;
+        } catch (error) {
+          console.error('Error decoding token:', error);
+        }
+      }
+
       const response = await fetch('http://localhost:5000/api/transactions', {
         method: 'POST',
         headers: {
@@ -118,6 +140,11 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
       const result = await response.json();
 
       if (response.ok) {
+        // If this is an expense transaction, update the related budget
+        if (activeTab === 'expense' && userId) {
+          await updateBudgetSpentAmount(userId, transactionData.category, transactionData.amount);
+        }
+
         alert(`${formData.title} added successfully!`);
         setTransactions(prev => [result.transaction || transactionData, ...prev]);
         setFormData({
@@ -146,6 +173,75 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
     }
   };
 
+  // Function to update budget spent amount
+  const updateBudgetSpentAmount = async (userId, category, expenseAmount) => {
+    try {
+      // First, get all budgets for the user
+      const budgetsResponse = await fetch(`http://localhost:5000/api/budgets/${userId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+
+      if (budgetsResponse.ok) {
+        const budgetsData = await budgetsResponse.json();
+        const budgets = budgetsData.budgets || [];
+
+        // Find budget that matches the expense category
+        const matchingBudget = budgets.find(budget => 
+          budget.category === category || 
+          (category === 'Other Expenses' && budget.category === 'Other')
+        );
+
+        if (matchingBudget) {
+          // Update the spent amount
+          const updatedSpentAmount = (matchingBudget.spentAmount || 0) + expenseAmount;
+
+          const updateData = {
+            userId: userId,
+            category: matchingBudget.category,
+            budgetAmount: matchingBudget.budgetAmount,
+            period: matchingBudget.period,
+            startDate: matchingBudget.startDate,
+            endDate: matchingBudget.endDate,
+            spentAmount: updatedSpentAmount
+          };
+
+          const updateResponse = await fetch(`http://localhost:5000/api/budgets/${matchingBudget.id}`, {
+            method: 'PUT',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+            },
+            body: JSON.stringify(updateData)
+          });
+
+          if (updateResponse.ok) {
+            console.log(`Budget updated successfully for category: ${category}`);
+            
+            // Check if budget is exceeded and show warning with correct currency
+            const percentage = (updatedSpentAmount / matchingBudget.budgetAmount) * 100;
+            if (percentage >= 100) {
+              alert(`⚠️ Budget Alert: You have exceeded your budget for ${category}! 
+Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchingBudget.budgetAmount.toFixed(2)}`);
+            } else if (percentage >= 80) {
+              alert(`⚠️ Budget Warning: You have used ${percentage.toFixed(1)}% of your budget for ${category}. 
+Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchingBudget.budgetAmount.toFixed(2)}`);
+            }
+          } else {
+            console.error('Failed to update budget spent amount');
+          }
+        } else {
+          console.log(`No budget found for category: ${category}`);
+        }
+      }
+    } catch (error) {
+      console.error('Error updating budget spent amount:', error);
+    }
+  };
+
   const handleTabChange = (tab) => {
     setActiveTab(tab);
     setErrors({});
@@ -153,7 +249,7 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
 
   const formatAmount = (amount) => {
     const num = typeof amount === 'number' ? amount : Number(amount);
-    return isNaN(num) ? '0.00' : num.toFixed(2);
+    return isNaN(num) ? '0.00' : `${currency}${num.toFixed(2)}`;
   };
 
   return (

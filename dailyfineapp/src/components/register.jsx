@@ -96,7 +96,7 @@ const Register = ({ onBackToLogin }) => {
       const result = await response.json();
 
       if (response.ok) {
-        alert('Registration successful! Please check your email for verification.');
+        alert('Registration successful! You can now log in with your credentials.');
         
         // Reset form
         setFormData({
@@ -107,8 +107,10 @@ const Register = ({ onBackToLogin }) => {
           telephone: ''
         });
         
-        // Optionally redirect to login after success
-        // onBackToLogin();
+        // Redirect to login after success
+        setTimeout(() => {
+          onBackToLogin();
+        }, 1000);
       } else {
         // Handle server errors
         if (result.errors) {
