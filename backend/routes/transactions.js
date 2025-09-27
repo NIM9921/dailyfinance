@@ -114,7 +114,7 @@ router.post('/', authMiddleware, async (req, res) => {
           color: '#007bff', // Default color
           icon: 'category', // Default icon
           user: userId,
-          isActive: true
+          isActive: true     
         });
         await existingCategory.save();
         console.log('New category created:', existingCategory._id);
@@ -400,6 +400,69 @@ router.post('/test', async (req, res) => {
     });
   } catch (error) {
     console.error('Create transaction error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: error.message
+    });
+  }
+});
+
+// @route   GET /api/transactions/test/user/:userId
+// @desc    Get all transactions for a specific user (for testing via Postman)
+// @access  Public
+router.get('/test/user/:userId', async (req, res) => {
+  try {
+    const { userId } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid userId format'
+      });
+    }
+
+    const { type, category, startDate, endDate, page = 1, limit = 10 } = req.query;
+
+    const query = { user: new mongoose.Types.ObjectId(userId) };
+    if (type) query.type = type;
+    if (category) {
+      if (!mongoose.Types.ObjectId.isValid(category)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Invalid category ID format'
+        });
+      }
+      query.category = new mongoose.Types.ObjectId(category);
+    }
+    if (startDate || endDate) {
+      query.date = {};
+      if (startDate) query.date.$gte = new Date(startDate);
+      if (endDate) query.date.$lte = new Date(endDate);
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [transactions, total] = await Promise.all([
+      Transaction.find(query)
+        .populate('category', 'name type color icon')
+        .populate('user', 'name email')
+        .sort({ date: -1 })
+        .skip(skip)
+        .limit(parseInt(limit)),
+      Transaction.countDocuments(query)
+    ]);
+
+    res.json({
+      success: true,
+      count: transactions.length,
+      total,
+      page: parseInt(page),
+      pages: Math.ceil(total / parseInt(limit)),
+      data: transactions
+    });
+  } catch (error) {
+    console.error('Get transactions by user (test) error:', error);
     res.status(500).json({
       success: false,
       message: 'Server error',
