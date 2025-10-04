@@ -9,7 +9,9 @@ import {
   faChartLine,
   faWallet,
   faSave,
-  faTrash
+  faTrash,
+  faList,
+  faInfoCircle
 } from '@fortawesome/free-solid-svg-icons';
 
 const Transaction = ({ onBackToLanding, initialTab }) => {
@@ -25,9 +27,17 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
   const [currency, setCurrency] = useState('₹');
+  const [isFetching, setIsFetching] = useState(false);
+  const [listType, setListType] = useState(null);
+  const [showDetailsModal, setShowDetailsModal] = useState(false);
+  const [selectedTx, setSelectedTx] = useState(null);
+  const [fetchedTransactions, setFetchedTransactions] = useState([]);
+  const [fetchMessage, setFetchMessage] = useState('');
+  const [showAllTxModal, setShowAllTxModal] = useState(false);
+  const [showIncomeModal, setShowIncomeModal] = useState(false);
+  const [showExpenseModal, setShowExpenseModal] = useState(false);
 
   useEffect(() => {
-    // Load saved currency preference
     const savedCurrency = localStorage.getItem('selectedCurrency') || '₹';
     setCurrency(savedCurrency);
     
@@ -111,23 +121,6 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
     try {
       console.log('Sending transaction data:', JSON.stringify(transactionData, null, 2));
 
-      // Get user data for budget update
-      const storedUserData = localStorage.getItem('userData');
-      const storedToken = localStorage.getItem('authToken');
-      let userId = null;
-
-      if (storedUserData) {
-        const user = JSON.parse(storedUserData);
-        userId = user.id || user.data?.id || user._id;
-      } else if (storedToken) {
-        try {
-          const tokenPayload = JSON.parse(atob(storedToken.split('.')[1]));
-          userId = tokenPayload.userId;
-        } catch (error) {
-          console.error('Error decoding token:', error);
-        }
-      }
-
       const response = await fetch('http://localhost:5000/api/transactions', {
         method: 'POST',
         headers: {
@@ -140,9 +133,8 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
       const result = await response.json();
 
       if (response.ok) {
-        // If this is an expense transaction, update the related budget
-        if (activeTab === 'expense' && userId) {
-          await updateBudgetSpentAmount(userId, transactionData.category, transactionData.amount);
+        if (activeTab === 'expense') {
+          await updateBudgetSpentAmount(getUserId(), transactionData.category, transactionData.amount);
         }
 
         alert(`${formData.title} added successfully!`);
@@ -173,10 +165,8 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
     }
   };
 
-  // Function to update budget spent amount
   const updateBudgetSpentAmount = async (userId, category, expenseAmount) => {
     try {
-      // First, get all budgets for the user
       const budgetsResponse = await fetch(`http://localhost:5000/api/budgets/${userId}`, {
         method: 'GET',
         headers: {
@@ -189,14 +179,12 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
         const budgetsData = await budgetsResponse.json();
         const budgets = budgetsData.budgets || [];
 
-        // Find budget that matches the expense category
         const matchingBudget = budgets.find(budget => 
           budget.category === category || 
           (category === 'Other Expenses' && budget.category === 'Other')
         );
 
         if (matchingBudget) {
-          // Update the spent amount
           const updatedSpentAmount = (matchingBudget.spentAmount || 0) + expenseAmount;
 
           const updateData = {
@@ -221,7 +209,6 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
           if (updateResponse.ok) {
             console.log(`Budget updated successfully for category: ${category}`);
             
-            // Check if budget is exceeded and show warning with correct currency
             const percentage = (updatedSpentAmount / matchingBudget.budgetAmount) * 100;
             if (percentage >= 100) {
               alert(`⚠️ Budget Alert: You have exceeded your budget for ${category}! 
@@ -250,6 +237,86 @@ Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchi
   const formatAmount = (amount) => {
     const num = typeof amount === 'number' ? amount : Number(amount);
     return isNaN(num) ? '0.00' : `${currency}${num.toFixed(2)}`;
+  };
+
+  const getUserId = () => {
+    const storedUserData = localStorage.getItem('userData');
+    if (storedUserData) {
+      const user = JSON.parse(storedUserData);
+      return user.id || user.data?.id || user._id || null;
+    }
+    const storedToken = localStorage.getItem('authToken');
+    if (storedToken) {
+      try {
+        const tokenPayload = JSON.parse(atob(storedToken.split('.')[1]));
+        return tokenPayload.userId || null;
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  };
+
+  const fetchUserTransactions = async (type = null) => {
+    const userId = getUserId();
+    if (!userId) {
+      alert('User not found. Please log in again.');
+      return;
+    }
+
+    setIsFetching(true);
+    setFetchMessage('');
+    try {
+      const res = await fetch(`http://localhost:5000/api/transactions/test/user/${userId}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+        }
+      });
+      const data = await res.json();
+
+      // Normalize possible shapes (fix: handle data.data array)
+      let list = [];
+      if (Array.isArray(data)) {
+        list = data;
+      } else if (Array.isArray(data.data)) {
+        list = data.data; // NEW: handle { success, count, ..., data: [...] }
+      } else if (Array.isArray(data.transactions)) {
+        list = data.transactions;
+      } else if (Array.isArray(data.data?.transactions)) {
+        list = data.data.transactions;
+      } else if (data._id) {
+        list = [data];
+      }
+
+      // Filter if type provided
+      if (type && type !== 'all') {
+        list = list.filter(t => (t.type || '').toLowerCase() === type);
+      }
+
+      setListType(type || 'all');
+      setFetchedTransactions(list);
+
+      if (!list || list.length === 0) {
+        setFetchMessage('No transactions found for the selected filter.');
+      }
+    } catch (err) {
+      console.error('Failed to fetch transactions:', err);
+      setFetchMessage('Failed to fetch transactions. Please try again.');
+      setFetchedTransactions([]);
+    } finally {
+      setIsFetching(false);
+    }
+  };
+
+  const openDetails = (tx) => {
+    setSelectedTx(tx);
+    setShowDetailsModal(true);
+  };
+  const closeDetails = () => {
+    setSelectedTx(null);
+    setShowDetailsModal(false);
   };
 
   return (
@@ -302,6 +369,40 @@ Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchi
           </div>
 
           <div className="p-6 md:p-8">
+            {/* Buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 mb-6">
+              {/* All */}
+              <button
+                type="button"
+                onClick={() => { setShowAllTxModal(true); fetchUserTransactions('all'); }}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-blue-200 text-blue-700 bg-blue-50 hover:bg-blue-100 transition"
+                disabled={isFetching}
+              >
+                <FontAwesomeIcon icon={faList} className="mr-2" />
+                {isFetching && listType === 'all' ? 'Loading...' : 'View All Transactions'}
+              </button>
+              {/* Income -> open income modal */}
+              <button
+                type="button"
+                onClick={() => { setShowIncomeModal(true); fetchUserTransactions('income'); }}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-green-200 text-green-700 bg-green-50 hover:bg-green-100 transition"
+                disabled={isFetching}
+              >
+                <FontAwesomeIcon icon={faList} className="mr-2" />
+                {isFetching && listType === 'income' ? 'Loading...' : 'View All Income'}
+              </button>
+              {/* Expense -> open expense modal */}
+              <button
+                type="button"
+                onClick={() => { setShowExpenseModal(true); fetchUserTransactions('expense'); }}
+                className="inline-flex items-center justify-center px-4 py-2 rounded-lg border border-red-200 text-red-700 bg-red-50 hover:bg-red-100 transition"
+                disabled={isFetching}
+              >
+                <FontAwesomeIcon icon={faList} className="mr-2" />
+                {isFetching && listType === 'expense' ? 'Loading...' : 'View All Expenses'}
+              </button>
+            </div>
+
             <form onSubmit={handleSubmit} className="space-y-6">
               <div>
                 <label htmlFor="title" className="block text-sm font-medium text-gray-700 mb-2">
@@ -461,35 +562,287 @@ Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchi
           </div>
         </div>
 
-        {transactions.length > 0 && (
-          <div className="bg-white rounded-xl shadow-lg">
-            <div className="px-6 py-4 border-b border-gray-200">
-              <h3 className="text-lg font-medium text-gray-900">Recent Transactions</h3>
+        {/* All Transactions Modal (unchanged) */}
+        {showAllTxModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-4xl w-full mx-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900">All Transactions</h3>
+                <button
+                  onClick={() => setShowAllTxModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+                >
+                  Close
+                </button>
+              </div>
+
+              {/* Loader */}
+              {isFetching && (
+                <div className="py-8 text-center">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
+                  <p className="mt-2 text-violet-600">Loading...</p>
+                </div>
+              )}
+
+              {/* Empty / Error */}
+              {!isFetching && fetchMessage && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-gray-600 text-center">
+                  {fetchMessage}
+                </div>
+              )}
+
+              {/* Table */}
+              {!isFetching && fetchedTransactions.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                        <th className="px-4 py-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {fetchedTransactions.map((tx) => {
+                        const typeIsIncome = (tx.type || '').toLowerCase() === 'income';
+                        const categoryName =
+                          typeof tx.category === 'object' && tx.category?.name
+                            ? tx.category.name
+                            : (tx.category || 'Uncategorized');
+                        return (
+                          <tr key={tx._id || `${tx.type}-${tx.createdAt || Math.random()}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm text-gray-700">
+                              {tx.date ? new Date(tx.date).toLocaleDateString() : ''}
+                            </td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{categoryName}</td>
+                            <td className="px-4 py-3 text-sm">
+                              <span className={`px-2 py-1 rounded-full text-xs font-semibold ${typeIsIncome ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                {typeIsIncome ? 'Income' : 'Expense'}
+                              </span>
+                            </td>
+                            <td className={`px-4 py-3 text-sm text-right font-semibold ${typeIsIncome ? 'text-green-600' : 'text-red-600'}`}>
+                              {typeIsIncome ? '+' : '-'}{formatAmount(Number(tx.amount) || 0)}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => openDetails(tx)}
+                                className="inline-flex items-center px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100 transition"
+                              >
+                                <FontAwesomeIcon icon={faInfoCircle} className="mr-2" />
+                                Details
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
-            <div className="p-6">
-              <div className="space-y-3">
-                {transactions.slice(0, 5).map((transaction, index) => (
-                  <div key={index} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-center space-x-3">
-                      <div
-                        className={`w-3 h-3 rounded-full ${
-                          transaction.type === 'income' ? 'bg-green-500' : 'bg-red-500'
-                        }`}
-                      ></div>
-                      <div>
-                        <p className="font-medium text-gray-900">{transaction.category}</p>
-                        <p className="text-sm text-gray-500">{transaction.date}</p>
-                      </div>
-                    </div>
-                    <p
-                      className={`font-semibold ${
-                        transaction.type === 'income' ? 'text-green-600' : 'text-red-600'
-                      }`}
-                    >
-                      {transaction.type === 'income' ? '+' : '-'}${formatAmount(transaction.amount)}
-                    </p>
+          </div>
+        )}
+
+        {/* NEW: Income Transactions Modal */}
+        {showIncomeModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-4xl w-full mx-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-green-800">All Income Transactions</h3>
+                <button
+                  onClick={() => setShowIncomeModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+                >
+                  Close
+                </button>
+              </div>
+
+              {isFetching && (
+                <div className="py-8 text-center">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
+                  <p className="mt-2 text-violet-600">Loading income...</p>
+                </div>
+              )}
+
+              {!isFetching && fetchMessage && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-gray-600 text-center">
+                  {fetchMessage}
+                </div>
+              )}
+
+              {!isFetching && fetchedTransactions.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                        <th className="px-4 py-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {fetchedTransactions.map(tx => {
+                        const categoryName = typeof tx.category === 'object' && tx.category?.name ? tx.category.name : (tx.category || 'Uncategorized');
+                        return (
+                          <tr key={tx._id || `${tx.type}-${tx.createdAt || Math.random()}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm text-gray-700">{tx.date ? new Date(tx.date).toLocaleDateString() : ''}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{categoryName}</td>
+                            <td className="px-4 py-3 text-sm text-right font-semibold text-green-600">
+                              +{formatAmount(Number(tx.amount) || 0)}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => openDetails(tx)}
+                                className="inline-flex items-center px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100 transition"
+                              >
+                                <FontAwesomeIcon icon={faInfoCircle} className="mr-2" />
+                                Details
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* NEW: Expense Transactions Modal */}
+        {showExpenseModal && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-4xl w-full mx-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-red-800">All Expense Transactions</h3>
+                <button
+                  onClick={() => setShowExpenseModal(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+                >
+                  Close
+                </button>
+              </div>
+
+              {isFetching && (
+                <div className="py-8 text-center">
+                  <div className="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-violet-600"></div>
+                  <p className="mt-2 text-violet-600">Loading expenses...</p>
+                </div>
+              )}
+
+              {!isFetching && fetchMessage && (
+                <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 text-gray-600 text-center">
+                  {fetchMessage}
+                </div>
+              )}
+
+              {!isFetching && fetchedTransactions.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-200">
+                    <thead className="bg-gray-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                        <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+                        <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Amount</th>
+                        <th className="px-4 py-3"></th>
+                      </tr>
+                    </thead>
+                    <tbody className="bg-white divide-y divide-gray-200">
+                      {fetchedTransactions.map(tx => {
+                        const categoryName = typeof tx.category === 'object' && tx.category?.name ? tx.category.name : (tx.category || 'Uncategorized');
+                        return (
+                          <tr key={tx._id || `${tx.type}-${tx.createdAt || Math.random()}`} className="hover:bg-gray-50">
+                            <td className="px-4 py-3 text-sm text-gray-700">{tx.date ? new Date(tx.date).toLocaleDateString() : ''}</td>
+                            <td className="px-4 py-3 text-sm text-gray-900">{categoryName}</td>
+                            <td className="px-4 py-3 text-sm text-right font-semibold text-red-600">
+                              -{formatAmount(Number(tx.amount) || 0)}
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <button
+                                onClick={() => openDetails(tx)}
+                                className="inline-flex items-center px-3 py-1.5 text-sm rounded-lg border border-gray-200 text-gray-700 hover:bg-gray-100 transition"
+                              >
+                                <FontAwesomeIcon icon={faInfoCircle} className="mr-2" />
+                                Details
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Details Modal (unchanged) */}
+        {showDetailsModal && selectedTx && (
+          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+            <div className="bg-white rounded-xl p-6 max-w-lg w-full mx-4">
+              <div className="flex items-center mb-4">
+                <FontAwesomeIcon
+                  icon={selectedTx.type === 'income' ? faChartLine : faWallet}
+                  className={`h-6 w-6 mr-3 ${selectedTx.type === 'income' ? 'text-green-600' : 'text-red-600'}`}
+                />
+                <h3 className="text-lg font-semibold text-gray-900">
+                  {selectedTx.title || (selectedTx.type === 'income' ? 'Income' : 'Expense')} Details
+                </h3>
+              </div>
+
+              <div className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Amount</span>
+                  <span className={`${selectedTx.type === 'income' ? 'text-green-600' : 'text-red-600'} font-semibold`}>
+                    {formatAmount(selectedTx.amount)}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Category</span>
+                  <span className="text-gray-800">
+                    {typeof selectedTx.category === 'object' && selectedTx.category?.name
+                      ? selectedTx.category.name
+                      : (selectedTx.category || 'Uncategorized')}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-gray-500">Date</span>
+                  <span className="text-gray-800">
+                    {selectedTx.date ? new Date(selectedTx.date).toLocaleString() : ''}
+                  </span>
+                </div>
+                {selectedTx.paymentMethod && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">Payment Method</span>
+                    <span className="text-gray-800">{selectedTx.paymentMethod}</span>
                   </div>
-                ))}
+                )}
+                {selectedTx.description && (
+                  <div>
+                    <span className="text-gray-500">Description</span>
+                    <p className="text-gray-800 mt-1">{selectedTx.description}</p>
+                  </div>
+                )}
+                {selectedTx.user?.name && (
+                  <div className="flex justify-between">
+                    <span className="text-gray-500">User</span>
+                    <span className="text-gray-800">{selectedTx.user.name}</span>
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-6 flex justify-end">
+                <button
+                  onClick={closeDetails}
+                  className="px-6 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition"
+                >
+                  Close
+                </button>
               </div>
             </div>
           </div>
