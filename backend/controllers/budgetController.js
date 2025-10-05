@@ -1,4 +1,5 @@
 const Budget = require('../models/Budget');
+const { checkBudgetThresholds } = require('../services/notificationService'); // added
 
 // Create a new budget
 const createBudget = async (req, res) => {
@@ -24,6 +25,7 @@ const createBudget = async (req, res) => {
         });
 
         const savedBudget = await budget.save();
+        checkBudgetThresholds(savedBudget).catch(()=>{}); // added
         
         res.status(201).json({
             success: true,
@@ -136,7 +138,7 @@ const updateBudget = async (req, res) => {
                 message: 'Budget not found'
             });
         }
-
+        checkBudgetThresholds(updatedBudget).catch(()=>{}); // added
         res.status(200).json({
             success: true,
             message: 'Budget updated successfully',
