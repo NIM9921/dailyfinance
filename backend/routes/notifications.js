@@ -145,4 +145,40 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
+// NEW: GET /api/notifications/unread-count?userId=...
+router.get('/unread-count', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: 'Valid userId required' });
+    }
+    const count = await Notification.countDocuments({ user: userId, read: false });
+    res.json({ success: true, unread: count });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Server error', error: e.message });
+  }
+});
+
+// NEW: GET /api/notifications/stats?userId=...
+router.get('/stats', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
+      return res.status(400).json({ success: false, message: 'Valid userId required' });
+    }
+    const pipeline = [
+      { $match: { user: new mongoose.Types.ObjectId(userId) } },
+      { $group: { _id: '$type', total: { $sum: 1 }, unread: { $sum: { $cond: [{ $eq: ['$read', false] }, 1, 0] } } } }
+    ];
+    const agg = await Notification.aggregate(pipeline);
+    const stats = agg.reduce((acc, r) => {
+      acc[r._id] = { total: r.total, unread: r.unread };
+      return acc;
+    }, {});
+    res.json({ success: true, stats });
+  } catch (e) {
+    res.status(500).json({ success: false, message: 'Server error', error: e.message });
+  }
+});
+
 module.exports = router;

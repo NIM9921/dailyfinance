@@ -57,6 +57,7 @@ app.use('/api/transactions', require('./routes/transactions'));
 app.use('/api/categories', require('./routes/categories'));
 app.use('/api/budgets', require('./routes/budgetRoutes'));
 app.use('/api/notifications', require('./routes/notifications')); // added
+app.use('/api/users', require('./routes/users')); // add users profile routes
 
 // Error handling middleware
 app.use((err, req, res, next) => {

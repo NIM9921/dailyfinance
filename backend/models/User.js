@@ -40,7 +40,14 @@ const userSchema = new mongoose.Schema({
   isActive: {
     type: Boolean,
     default: true
-  }
+  },
+  dateOfBirth: { type: Date },
+  gender: { type: String, enum: ['male','female','other'], default: null },
+  country: { type: String, trim: true },
+  designation: { type: String, trim: true },
+  averageMonthlyIncome: { type: Number, min: 0 },
+  civilStatus: { type: String, enum: ['single','married','divorced','widowed','other'], default: 'single' },
+  profileImage: { type: String } // base64 data URL
 }, {
   timestamps: true
 });

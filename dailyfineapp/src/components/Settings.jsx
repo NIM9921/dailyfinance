@@ -19,6 +19,9 @@ import {
   faCheckCircle
 } from '@fortawesome/free-solid-svg-icons';
 
+// ADD: explicit backend base (was using relative paths -> hitting Vite 5173)
+const API_BASE = 'http://localhost:5000';
+
 const Settings = ({ onBackToLanding }) => {
   const [activeTab, setActiveTab] = useState('profile');
   const [userData, setUserData] = useState({
@@ -66,11 +69,11 @@ const Settings = ({ onBackToLanding }) => {
   const [passwordSaving, setPasswordSaving] = useState(false);
   const [deletingAccount, setDeletingAccount] = useState(false);
   const [backendError, setBackendError] = useState('');
-  const [backendReady, setBackendReady] = useState(false); // flipped true after first attempts
+  const [backendReady, setBackendReady] = useState(false);
 
   const [imageUploading, setImageUploading] = useState(false);
   const [imageError, setImageError] = useState('');
-  const [newImageFile, setNewImageFile] = useState(null); // track unsaved file
+  const [newImageFile, setNewImageFile] = useState(null);
   const fileInputRef = useRef(null);
 
   // Currency options
@@ -101,7 +104,7 @@ const Settings = ({ onBackToLanding }) => {
     loadSettings();
   }, []);
 
-  // Utility: get auth & userId (reuse logic if present elsewhere)
+  // Utility: get auth & userId
   const getAuthToken = () => localStorage.getItem('authToken') || '';
   const getUserId = () => {
     try {
@@ -124,16 +127,14 @@ const Settings = ({ onBackToLanding }) => {
     'Authorization': `Bearer ${getAuthToken()}`
   });
 
-  // ====== BACKEND HELPERS (PROVISIONAL, WAITING FOR YOUR ENDPOINT SPECS) ======
-
-  // TODO: Replace placeholder URLs with your actual endpoints after you answer questions.
+  // UPDATED: all endpoints now absolute (previously relative -> 5173)
   const ENDPOINTS = {
-    profileGet:   (uid) => `/api/users/${uid}`,                 // GET
-    profileUpdate:(uid) => `/api/users/${uid}`,                 // PUT/PATCH
-    settingsGet:  (uid) => `/api/users/${uid}/settings`,        // GET
-    settingsUpdate:(uid)=> `/api/users/${uid}/settings`,        // PUT/PATCH
-    passwordUpdate:(uid)=> `/api/users/${uid}/password`,        // PUT/PATCH
-    deleteAccount:(uid)=> `/api/users/${uid}`                   // DELETE
+    profileGet:    (uid) => `${API_BASE}/api/users/${uid}`,
+    profileUpdate: (uid) => `${API_BASE}/api/users/${uid}`,
+    settingsGet:   (uid) => `${API_BASE}/api/users/${uid}/settings`,
+    settingsUpdate:(uid) => `${API_BASE}/api/users/${uid}/settings`,
+    passwordUpdate:(uid) => `${API_BASE}/api/users/${uid}/password`,
+    deleteAccount: (uid) => `${API_BASE}/api/users/${uid}`
   };
 
   const loadUserData = () => {
@@ -172,7 +173,6 @@ const Settings = ({ onBackToLanding }) => {
     }
   };
 
-  // Fetch profile from backend
   const fetchProfileFromBackend = async () => {
     const uid = getUserId();
     if (!uid) return;
@@ -182,19 +182,28 @@ const Settings = ({ onBackToLanding }) => {
       const res = await fetch(ENDPOINTS.profileGet(uid), { headers: authHeaders() });
       if (!res.ok) throw new Error(`Profile fetch failed: ${res.status}`);
       const data = await res.json();
-      // EXPECTED: data = { id, name, email, telephone, profileImage? }
+
+      // NEW: support shape { success, user: { ... } }
+      const u = data.user ? data.user : data; // fallback to previous shape
+      const isoDob = u.dateOfBirth || u.dob || '';
+      const dobForInput = isoDob
+        ? new Date(isoDob).toISOString().split('T')[0]
+        : '';
+
       setUserData(prev => ({
         ...prev,
-        name: data.name ?? prev.name,
-        email: data.email ?? prev.email,
-        telephone: data.telephone ?? prev.telephone,
-        profileImage: data.profileImage ?? prev.profileImage,
-        dateOfBirth: data.dateOfBirth ?? data.dob ?? prev.dateOfBirth,
-        gender: data.gender ?? prev.gender,
-        country: data.country ?? prev.country,
-        designation: data.designation ?? prev.designation,
-        averageMonthlyIncome: data.averageMonthlyIncome ?? data.avgIncome ?? prev.averageMonthlyIncome,
-        civilStatus: data.civilStatus ?? data.maritalStatus ?? prev.civilStatus
+        name: u.name ?? prev.name,
+        email: u.email ?? prev.email,
+        telephone: u.telephone ?? prev.telephone,
+        profileImage: u.profileImage || u.image || u.avatar || prev.profileImage,
+        dateOfBirth: dobForInput || prev.dateOfBirth,
+        gender: u.gender ?? prev.gender,
+        country: u.country ?? prev.country,
+        designation: u.designation ?? prev.designation,
+        averageMonthlyIncome: (u.averageMonthlyIncome !== undefined
+          ? u.averageMonthlyIncome
+          : u.avgIncome) ?? prev.averageMonthlyIncome,
+        civilStatus: u.civilStatus || u.maritalStatus || prev.civilStatus
       }));
     } catch (e) {
       console.warn('Profile backend load failed, using local storage fallback.', e);
@@ -203,7 +212,6 @@ const Settings = ({ onBackToLanding }) => {
     }
   };
 
-  // Fetch settings from backend
   const fetchSettingsFromBackend = async () => {
     const uid = getUserId();
     if (!uid) return;
@@ -213,8 +221,6 @@ const Settings = ({ onBackToLanding }) => {
       const res = await fetch(ENDPOINTS.settingsGet(uid), { headers: authHeaders() });
       if (!res.ok) throw new Error(`Settings fetch failed: ${res.status}`);
       const data = await res.json();
-      // EXPECTED shape (confirm later):
-      // { currency, language, theme, notifications: { budgetAlerts, emailNotifications, pushNotifications } }
       setSettings(prev => ({
         ...prev,
         currency: data.currency ?? prev.currency,
@@ -222,8 +228,8 @@ const Settings = ({ onBackToLanding }) => {
         theme: data.theme ?? prev.theme,
         notifications: {
           budgetAlerts: data.notifications?.budgetAlerts ?? prev.notifications.budgetAlerts,
-            emailNotifications: data.notifications?.emailNotifications ?? prev.notifications.emailNotifications,
-            pushNotifications: data.notifications?.pushNotifications ?? prev.notifications.pushNotifications
+          emailNotifications: data.notifications?.emailNotifications ?? prev.notifications.emailNotifications,
+          pushNotifications: data.notifications?.pushNotifications ?? prev.notifications.pushNotifications
         }
       }));
     } catch (e) {
@@ -233,7 +239,22 @@ const Settings = ({ onBackToLanding }) => {
     }
   };
 
-  // Save profile to backend (replaces handleProfileUpdate local-only)
+  const buildProfilePayload = () => {
+    const payload = {
+      name: userData.name.trim(),
+      email: userData.email.trim(),
+      telephone: userData.telephone.trim(),
+      dateOfBirth: userData.dateOfBirth || '',
+      gender: userData.gender || '',
+      country: userData.country || '',
+      designation: userData.designation || '',
+      averageMonthlyIncome: userData.averageMonthlyIncome === '' ? 0 : Number(userData.averageMonthlyIncome),
+      civilStatus: userData.civilStatus || '',
+      profileImage: userData.profileImage || ''
+    };
+    return payload;
+  };
+
   const saveProfileToBackend = async () => {
     if (!validateProfileForm()) return;
     const uid = getUserId();
@@ -241,22 +262,8 @@ const Settings = ({ onBackToLanding }) => {
     setProfileSaving(true);
     setBackendError('');
     try {
-      let uploadedUrl = null;
-      if (newImageFile) {
-        uploadedUrl = await uploadProfileImage(newImageFile);
-      }
-      const payload = {
-        name: userData.name.trim(),
-        email: userData.email.trim(),
-        telephone: userData.telephone.trim(),
-        dateOfBirth: userData.dateOfBirth || null,
-        gender: userData.gender || null,
-        country: userData.country || null,
-        designation: userData.designation || null,
-        averageMonthlyIncome: userData.averageMonthlyIncome ? Number(userData.averageMonthlyIncome) : null,
-        civilStatus: userData.civilStatus || null,
-        profileImage: uploadedUrl || userData.profileImage || null // backend URL preferred
-      };
+      const payload = buildProfilePayload();
+      // CHANGED: use ENDPOINTS.profileUpdate (was relative fetch -> wrong port)
       const res = await fetch(ENDPOINTS.profileUpdate(uid), {
         method: 'PUT',
         headers: authHeaders(),
@@ -264,20 +271,18 @@ const Settings = ({ onBackToLanding }) => {
       });
       const body = await res.json().catch(()=>({}));
       if (!res.ok) throw new Error(body.message || 'Profile update failed');
-      // Persist
-      localStorage.setItem('userData', JSON.stringify({ ...userData, profileImage: payload.profileImage }));
+      localStorage.setItem('userData', JSON.stringify({ ...userData, ...payload }));
       setNewImageFile(null);
       setShowSuccessMessage('Profile updated successfully (server)!');
     } catch (e) {
       setBackendError(e.message);
-      setShowSuccessMessage(''); // suppress success if error
+      setShowSuccessMessage('');
     } finally {
       setProfileSaving(false);
       setTimeout(()=> setShowSuccessMessage(''), 3000);
     }
   };
 
-  // Save settings to backend (replaces handleSettingsUpdate)
   const saveSettingsToBackend = async () => {
     const uid = getUserId();
     if (!uid) return;
@@ -309,7 +314,6 @@ const Settings = ({ onBackToLanding }) => {
     }
   };
 
-  // Update password
   const updatePasswordBackend = async () => {
     if (!validatePasswordForm()) return;
     const uid = getUserId();
@@ -338,7 +342,6 @@ const Settings = ({ onBackToLanding }) => {
     }
   };
 
-  // Delete account backend
   const deleteAccountBackend = async () => {
     const uid = getUserId();
     if (!uid) return;
@@ -363,7 +366,6 @@ const Settings = ({ onBackToLanding }) => {
     }
   };
 
-  // Initial backend load attempt (after existing local loads)
   useEffect(() => {
     (async () => {
       await Promise.all([fetchProfileFromBackend(), fetchSettingsFromBackend()]);
@@ -406,7 +408,6 @@ const Settings = ({ onBackToLanding }) => {
     if (!userData.email.trim()) newErrors.email = 'Email is required';
     else if (!/\S+@\S+\.\S+/.test(userData.email)) newErrors.email = 'Email is invalid';
     if (!userData.telephone.trim()) newErrors.telephone = 'Phone number is required';
-    // optional: require dateOfBirth or others if needed
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -432,66 +433,48 @@ const Settings = ({ onBackToLanding }) => {
     return Object.keys(newErrors).length === 0;
   };
 
-  // OPTIONAL: backend image upload endpoint (adjust if different)
-  const uploadProfileImage = async (file) => {
-    const uid = getUserId();
-    if (!uid || !file) return null;
-    try {
-      setImageUploading(true);
-      setImageError('');
-      const formData = new FormData();
-      formData.append('image', file);
-      // If backend expects 'userId' in form:
-      formData.append('userId', uid);
-      const res = await fetch(`/api/users/${uid}/profile-image`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${getAuthToken()}`
-          // Do NOT set Content-Type; browser sets multipart boundary.
-        },
-        body: formData
-      });
-      if (!res.ok) {
-        console.warn('Image upload failed, will fallback to base64.');
-        return null;
-      }
-      const data = await res.json().catch(()=>({}));
-      // Expecting { imageUrl: 'http://...' }
-      return data.imageUrl || null;
-    } catch (e) {
-      console.error('Image upload error:', e);
-      return null;
-    } finally {
-      setImageUploading(false);
-    }
-  };
-
   const triggerImagePicker = () => {
-    if (fileInputRef.current) fileInputRef.current.click();
+    fileInputRef.current?.click();
   };
 
-  const handleImageSelected = (e) => {
+  const handleImageSelected = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
+    // Validate file type
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'];
+    if (!validTypes.includes(file.type)) {
+      setImageError('Please select a valid image file (PNG, JPEG, WEBP, or GIF)');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setImageError('Image size must be less than 5MB');
+      return;
+    }
+
     setImageError('');
-    // Validate type
-    if (!/^image\/(png|jpe?g|webp|gif)$/.test(file.type)) {
-      setImageError('Unsupported file type. Use PNG/JPG/WEBP/GIF.');
-      return;
+    setImageUploading(true);
+
+    try {
+      // Convert to base64
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result;
+        setUserData(prev => ({ ...prev, profileImage: base64String }));
+        setNewImageFile(file);
+        setImageUploading(false);
+      };
+      reader.onerror = () => {
+        setImageError('Failed to read image file');
+        setImageUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      setImageError('Failed to process image');
+      setImageUploading(false);
     }
-    // Validate size (e.g., 2MB)
-    const maxBytes = 2 * 1024 * 1024;
-    if (file.size > maxBytes) {
-      setImageError('File too large. Max 2MB.');
-      return;
-    }
-    setNewImageFile(file);
-    // Create preview immediately
-    const reader = new FileReader();
-    reader.onload = () => {
-      setUserData(prev => ({ ...prev, profileImage: reader.result }));
-    };
-    reader.readAsDataURL(file);
   };
 
   const ProfileTab = () => (
@@ -596,18 +579,18 @@ const Settings = ({ onBackToLanding }) => {
 
         <div>
           <label className="block text-sm font-medium text-gray-700 mb-2">Gender</label>
-            <select
-              value={userData.gender}
-              onChange={(e) => handleUserDataChange('gender', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-violet-500 focus:border-violet-500"
-            >
-              <option value="">Select</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-              <option value="nonbinary">Non-binary</option>
-              <option value="other">Other</option>
-              <option value="prefer_not_say">Prefer not to say</option>
-            </select>
+          <select
+            value={userData.gender}
+            onChange={(e) => handleUserDataChange('gender', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-violet-500 focus:border-violet-500"
+          >
+            <option value="">Select</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="nonbinary">Non-binary</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_say">Prefer not to say</option>
+          </select>
         </div>
 
         <div>
@@ -672,7 +655,6 @@ const Settings = ({ onBackToLanding }) => {
         {profileSaving ? 'Saving...' : 'Update Profile'}
       </button>
 
-      {/* Inline status for backend errors */}
       {backendError && <div className="mt-4 text-sm text-red-600">{backendError}</div>}
     </div>
   );
@@ -788,7 +770,6 @@ const Settings = ({ onBackToLanding }) => {
         {settingsSaving ? 'Saving...' : 'Save Preferences'}
       </button>
 
-      {/* Inline status for backend errors */}
       {backendError && <div className="mt-4 text-sm text-red-600">{backendError}</div>}
     </div>
   );
@@ -876,7 +857,6 @@ const Settings = ({ onBackToLanding }) => {
             {passwordSaving ? 'Updating...' : 'Update Password'}
           </button>
 
-          {/* Inline status for backend errors */}
           {backendError && <div className="mt-4 text-sm text-red-600">{backendError}</div>}
         </div>
       </div>
@@ -1000,13 +980,15 @@ const Settings = ({ onBackToLanding }) => {
             <div className="flex space-x-4">
               <button
                 onClick={deleteAccountBackend}
-                className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition duration-200"
+                disabled={deletingAccount}
+                className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 disabled:opacity-50 transition duration-200"
               >
-                Yes, Delete Account
+                {deletingAccount ? 'Deleting...' : 'Yes, Delete Account'}
               </button>
               <button
                 onClick={() => setShowDeleteModal(false)}
-                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition duration-200"
+                disabled={deletingAccount}
+                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 disabled:opacity-50 transition duration-200"
               >
                 Cancel
               </button>
