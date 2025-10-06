@@ -1,4 +1,3 @@
-import { useState, useEffect } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { 
   faArrowLeft,
@@ -12,6 +11,7 @@ import {
   faExclamationTriangle,
   faCheckCircle
 } from '@fortawesome/free-solid-svg-icons';
+import { useState, useEffect } from 'react';
 
 // REPLACE previous computeEndDateForPeriod helper with the new duration-based version.
 const computeEndDateForPeriod = (period, startISO) => {
@@ -51,6 +51,7 @@ const Budget = ({ onBackToLanding }) => {
   const [periodFilter, setPeriodFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState({ start: '', end: '' });
   const [filteredBudgets, setFilteredBudgets] = useState([]);
+  const [currency, setCurrency] = useState(() => localStorage.getItem('selectedCurrency') || '$'); // lazy init
 
   // Get user data and fetch budgets on component mount
   useEffect(() => {
@@ -106,6 +107,17 @@ const Budget = ({ onBackToLanding }) => {
       console.log('No user data or token found in localStorage');
       setError('No user data found. Please log in again.');
     }
+  }, []);
+
+  useEffect(() => {
+    const cur = localStorage.getItem('selectedCurrency') || '$';
+    setCurrency(cur);
+    const handler = (e) => {
+      const c = e.detail?.currency || localStorage.getItem('selectedCurrency') || '$';
+      setCurrency(c);
+    };
+    window.addEventListener('app:settings-updated', handler);
+    return () => window.removeEventListener('app:settings-updated', handler);
   }, []);
 
   // API Functions
@@ -530,7 +542,7 @@ const Budget = ({ onBackToLanding }) => {
             <div>
               <p className="text-gray-500 text-sm">Total Budget (Filtered)</p>
               <p className="text-2xl font-bold text-gray-900">
-                ${filteredBudgets.reduce((sum, b) => sum + (b.budgetAmount || 0), 0).toFixed(2)}
+                {formatCurrency(filteredBudgets.reduce((sum, b) => sum + (b.budgetAmount || 0), 0))}
               </p>
             </div>
           </div>
@@ -542,7 +554,7 @@ const Budget = ({ onBackToLanding }) => {
             <div>
               <p className="text-gray-500 text-sm">Total Spent (Filtered)</p>
               <p className="text-2xl font-bold text-gray-900">
-                ${filteredBudgets.reduce((sum, b) => sum + (b.spentAmount || 0), 0).toFixed(2)}
+                {formatCurrency(filteredBudgets.reduce((sum, b) => sum + (b.spentAmount || 0), 0))}
               </p>
             </div>
           </div>
@@ -554,7 +566,7 @@ const Budget = ({ onBackToLanding }) => {
             <div>
               <p className="text-gray-500 text-sm">Remaining (Filtered)</p>
               <p className="text-2xl font-bold text-gray-900">
-                ${filteredBudgets.reduce((sum, b) => sum + ((b.budgetAmount || 0) - (b.spentAmount || 0)), 0).toFixed(2)}
+                {formatCurrency(filteredBudgets.reduce((sum, b) => sum + ((b.budgetAmount || 0) - (b.spentAmount || 0)), 0))}
               </p>
             </div>
           </div>
@@ -608,7 +620,7 @@ const Budget = ({ onBackToLanding }) => {
                   <div className="mb-2">
                     <div className="flex justify-between text-sm mb-1">
                       <span className="text-gray-600">
-                        ${budget.spentAmount || 0} of ${budget.budgetAmount || 0}
+                        {formatCurrency(budget.spentAmount || 0)} of {formatCurrency(budget.budgetAmount || 0)}
                       </span>
                       <span className={`font-medium text-${status.color}-600`}>
                         {status.text}
@@ -1101,6 +1113,8 @@ const Budget = ({ onBackToLanding }) => {
       </div>
     )
   );
+
+  const formatCurrency = (v) => `${currency}${Number(v || 0).toFixed(2)}`;
 
   return (
     <>

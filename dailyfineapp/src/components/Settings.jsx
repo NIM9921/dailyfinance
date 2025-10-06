@@ -36,8 +36,8 @@ const Settings = ({ onBackToLanding }) => {
     averageMonthlyIncome: '',
     civilStatus: ''
   });
-  const [settings, setSettings] = useState({
-    currency: '₹',
+  const [settings, setSettings] = useState(() => ({
+    currency: localStorage.getItem('selectedCurrency') || '$',
     language: 'English',
     theme: 'light',
     notifications: {
@@ -45,7 +45,7 @@ const Settings = ({ onBackToLanding }) => {
       emailNotifications: true,
       pushNotifications: false
     }
-  });
+  }));
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
@@ -158,7 +158,7 @@ const Settings = ({ onBackToLanding }) => {
   };
 
   const loadSettings = () => {
-    const savedCurrency = localStorage.getItem('selectedCurrency') || '₹';
+    const savedCurrency = localStorage.getItem('selectedCurrency') || '$'; // fallback changed
     const savedSettings = localStorage.getItem('userSettings');
     
     if (savedSettings) {
@@ -221,17 +221,24 @@ const Settings = ({ onBackToLanding }) => {
       const res = await fetch(ENDPOINTS.settingsGet(uid), { headers: authHeaders() });
       if (!res.ok) throw new Error(`Settings fetch failed: ${res.status}`);
       const data = await res.json();
-      setSettings(prev => ({
-        ...prev,
-        currency: data.currency ?? prev.currency,
-        language: data.language ?? prev.language,
-        theme: data.theme ?? prev.theme,
+
+      // UPDATED: handle nested { success, settings: { ... } }
+      const src = data.settings ? data.settings : data;
+
+      const updated = {
+        currency: src.currency || '$',
+        language: src.language ?? settings.language,
+        theme: src.theme ?? settings.theme,
         notifications: {
-          budgetAlerts: data.notifications?.budgetAlerts ?? prev.notifications.budgetAlerts,
-          emailNotifications: data.notifications?.emailNotifications ?? prev.notifications.emailNotifications,
-          pushNotifications: data.notifications?.pushNotifications ?? prev.notifications.pushNotifications
+          budgetAlerts: src.notifications?.budgetAlerts ?? settings.notifications.budgetAlerts,
+          emailNotifications: src.notifications?.emailNotifications ?? settings.notifications.emailNotifications,
+          pushNotifications: src.notifications?.pushNotifications ?? settings.notifications.pushNotifications
         }
-      }));
+      };
+      setSettings(updated);
+      localStorage.setItem('selectedCurrency', updated.currency);
+      localStorage.setItem('userSettings', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('app:settings-updated', { detail: updated }));
     } catch (e) {
       console.warn('Settings backend load failed, using local fallback.', e);
     } finally {
@@ -285,9 +292,9 @@ const Settings = ({ onBackToLanding }) => {
 
   // Helper: build preferences payload (only what backend needs for display prefs)
   const buildPreferencesPayload = () => ({
-    currency: settings.currency,       // e.g. "₹"
-    language: settings.language,       // e.g. "English"
-    theme: settings.theme              // "light" | "dark" | "auto"
+    currency: settings.currency || '$', // safeguard
+    language: settings.language,
+    theme: settings.theme
   });
 
   // OPTIONAL: full settings payload (if backend still wants notifications together)
@@ -320,10 +327,8 @@ const Settings = ({ onBackToLanding }) => {
     setSettingsSaving(true);
     setBackendError('');
     try {
-      // If backend wants ONLY the 3 preference fields, replace buildFullSettingsPayload() with buildPreferencesPayload()
-      const payload = buildFullSettingsPayload();
+      const payload = buildFullSettingsPayload(); // or buildPreferencesPayload()
       console.log('Sending settings payload to backend:', JSON.stringify(payload, null, 2));
-
       const res = await fetch(ENDPOINTS.settingsUpdate(uid), {
         method: 'PUT',
         headers: authHeaders(),
@@ -331,11 +336,10 @@ const Settings = ({ onBackToLanding }) => {
       });
       const body = await res.json().catch(()=>({}));
       if (!res.ok) throw new Error(body.message || 'Settings update failed');
-
-      // Persist locally
       localStorage.setItem('selectedCurrency', payload.currency);
       localStorage.setItem('userSettings', JSON.stringify(payload));
-
+      // ADDED: broadcast update
+      window.dispatchEvent(new CustomEvent('app:settings-updated', { detail: payload }));
       setShowSuccessMessage('Preferences saved (server)!');
     } catch (e) {
       setBackendError(e.message);

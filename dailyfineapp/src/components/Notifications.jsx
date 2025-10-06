@@ -22,7 +22,7 @@ const Notifications = ({ onBackToLanding }) => {
   const [notifications, setNotifications] = useState([]);
   const [filter, setFilter] = useState('all');
   const [isLoading, setIsLoading] = useState(false);
-  const [currency, setCurrency] = useState('₹');
+  const [currency, setCurrency] = useState(() => localStorage.getItem('selectedCurrency') || '$'); // lazy init from storage
   const [error, setError] = useState('');
   const [isUpdatingRead, setIsUpdatingRead] = useState(false);
   const [readError, setReadError] = useState('');
@@ -50,9 +50,17 @@ const Notifications = ({ onBackToLanding }) => {
   };
 
   useEffect(() => {
-    const savedCurrency = localStorage.getItem('selectedCurrency') || '₹';
-    setCurrency(savedCurrency);
     loadNotifications();
+  }, []);
+
+  // ADDED: react to settings updates
+  useEffect(() => {
+    const handler = (e) => {
+      const cur = e.detail?.currency || localStorage.getItem('selectedCurrency') || '$'; // changed fallback
+      setCurrency(cur);
+    };
+    window.addEventListener('app:settings-updated', handler);
+    return () => window.removeEventListener('app:settings-updated', handler);
   }, []);
 
   const normalizeBackendNotification = (n) => ({

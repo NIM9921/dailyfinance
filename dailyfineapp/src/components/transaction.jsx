@@ -26,7 +26,7 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
-  const [currency, setCurrency] = useState('₹');
+  const [currency, setCurrency] = useState(() => localStorage.getItem('selectedCurrency') || '$'); // lazy init from storage
   const [isFetching, setIsFetching] = useState(false);
   const [listType, setListType] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -38,15 +38,22 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
   const [showExpenseModal, setShowExpenseModal] = useState(false);
 
   useEffect(() => {
-    const savedCurrency = localStorage.getItem('selectedCurrency') || '₹';
-    setCurrency(savedCurrency);
-    
     setFormData(prev => ({
       ...prev,
       title: activeTab === 'income' ? 'Income' : 'Expenses',
       category: ''
     }));
   }, [activeTab]);
+
+  // ADDED: global settings update listener
+  useEffect(() => {
+    const onSettings = (e) => {
+      const cur = e.detail?.currency || localStorage.getItem('selectedCurrency') || '$'; // changed fallback
+      setCurrency(cur);
+    };
+    window.addEventListener('app:settings-updated', onSettings);
+    return () => window.removeEventListener('app:settings-updated', onSettings);
+  }, []);
 
   const incomeCategories = [
     'Salary',
@@ -84,6 +91,28 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
     }));
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  const handleAmountInput = (e) => {
+    let v = e.target.value;
+    // Remove invalid chars
+    v = v.replace(/[^0-9.]/g, '');
+    // Keep only first dot
+    const firstDot = v.indexOf('.');
+    if (firstDot !== -1) {
+      const before = v.slice(0, firstDot + 1);
+      const after = v.slice(firstDot + 1).replace(/\./g, '');
+      v = before + after;
+    }
+    // Limit to 2 decimals
+    if (v.includes('.')) {
+      const [intPart, decPart] = v.split('.');
+      v = intPart + '.' + decPart.slice(0, 2);
+    }
+    setFormData(prev => ({ ...prev, amount: v }));
+    if (errors.amount) {
+      setErrors(prev => ({ ...prev, amount: '' }));
     }
   };
 
@@ -269,7 +298,7 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
 
   const formatAmount = (amount) => {
     const num = typeof amount === 'number' ? amount : Number(amount);
-    return isNaN(num) ? '0.00' : `${currency}${num.toFixed(2)}`;
+    return isNaN(num) ? `${currency}0.00` : `${currency}${num.toFixed(2)}`;
   };
 
   const getUserId = () => {
@@ -467,18 +496,18 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
                     Amount *
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <FontAwesomeIcon icon={faDollarSign} className="h-5 w-5 text-gray-400" />
-                    </div>
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-gray-500 font-semibold">{currency}</span>
+                    </span>
                     <input
                       id="amount"
                       name="amount"
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
                       value={formData.amount}
-                      onChange={handleChange}
-                      className={`w-full pl-10 pr-4 py-3 border ${
+                      onChange={handleAmountInput}
+                      className={`w-full pl-9 pr-4 py-3 border ${
                         errors.amount ? 'border-red-500' : 'border-gray-300'
                       } rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500`}
                       placeholder="0.00"
