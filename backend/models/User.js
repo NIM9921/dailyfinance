@@ -47,7 +47,17 @@ const userSchema = new mongoose.Schema({
   designation: { type: String, trim: true },
   averageMonthlyIncome: { type: Number, min: 0 },
   civilStatus: { type: String, enum: ['single','married','divorced','widowed','other'], default: 'single' },
-  profileImage: { type: String } // base64 data URL
+  profileImage: { type: String }, // base64 data URL
+  settings: {
+    currency: { type: String, default: 'USD' },
+    language: { type: String, default: 'English' },
+    theme: { type: String, enum: ['light','dark','system'], default: 'light' },
+    notifications: {
+      budgetAlerts: { type: Boolean, default: true },
+      emailNotifications: { type: Boolean, default: true },
+      pushNotifications: { type: Boolean, default: false }
+    }
+  }
 }, {
   timestamps: true
 });

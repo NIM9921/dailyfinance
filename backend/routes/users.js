@@ -23,7 +23,17 @@ function mapUserFields(u) {
     dateOfBirth: u.dateOfBirth,
     designation: u.designation,
     gender: u.gender,
-    profileImage: u.profileImage || ''
+    profileImage: u.profileImage || '',
+    settings: u.settings || {
+      currency: 'USD',
+      language: 'English',
+      theme: 'light',
+      notifications: {
+        budgetAlerts: true,
+        emailNotifications: true,
+        pushNotifications: false
+      }
+    }
   };
 }
 
@@ -80,6 +90,57 @@ router.put('/:id', async (req, res) => {
   } catch (e) {
     if (e.code === 11000)
       return res.status(400).json({ success: false, message: 'Email already in use' });
+    return res.status(500).json({ success: false, message: 'Server error', error: e.message });
+  }
+});
+
+// GET /api/users/:id/settings
+router.get('/:id/settings', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+    const user = await User.findById(id).select('settings');
+    if (!user) return res.status(404).json({ success: false, message: 'User not found' });
+    return res.json({ success: true, settings: user.settings || {} });
+  } catch (e) {
+    return res.status(500).json({ success: false, message: 'Server error', error: e.message });
+  }
+});
+
+// PUT /api/users/:id/settings
+router.put('/:id/settings', async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id))
+      return res.status(400).json({ success: false, message: 'Invalid user id' });
+
+    const { currency, language, theme, notifications } = req.body;
+
+    const user = await User.findById(id);
+    if (!user)
+      return res.status(404).json({ success: false, message: 'User not found' });
+
+    if (!user.settings) user.settings = {};
+
+    if (currency !== undefined) user.settings.currency = currency;
+    if (language !== undefined) user.settings.language = language;
+    if (theme !== undefined) user.settings.theme = theme;
+    if (notifications && typeof notifications === 'object') {
+      user.settings.notifications = {
+        ...user.settings.notifications?.toObject?.() || user.settings.notifications || {},
+        ...notifications
+      };
+    }
+
+    await user.save();
+
+    return res.json({
+      success: true,
+      message: 'Settings updated successfully',
+      settings: user.settings
+    });
+  } catch (e) {
     return res.status(500).json({ success: false, message: 'Server error', error: e.message });
   }
 });

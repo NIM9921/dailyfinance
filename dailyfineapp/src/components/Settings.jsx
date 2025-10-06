@@ -283,18 +283,47 @@ const Settings = ({ onBackToLanding }) => {
     }
   };
 
+  // Helper: build preferences payload (only what backend needs for display prefs)
+  const buildPreferencesPayload = () => ({
+    currency: settings.currency,       // e.g. "₹"
+    language: settings.language,       // e.g. "English"
+    theme: settings.theme              // "light" | "dark" | "auto"
+  });
+
+  // OPTIONAL: full settings payload (if backend still wants notifications together)
+  const buildFullSettingsPayload = () => ({
+    ...buildPreferencesPayload(),
+    notifications: settings.notifications
+  });
+
+  /**
+   * saveSettingsToBackend
+   * Sends ONLY currency, language, theme (+ notifications if your backend already expects them).
+   * Adjust to buildPreferencesPayload() if backend wants ONLY those 3 fields.
+   * Request:
+   *  PUT ${API_BASE}/api/users/:id/settings
+   *  Body (JSON):
+   *    {
+   *      "currency": "₹",
+   *      "language": "English",
+   *      "theme": "light",
+   *      "notifications": {
+   *        "budgetAlerts": true,
+   *        "emailNotifications": true,
+   *        "pushNotifications": false
+   *      }
+   *    }
+   */
   const saveSettingsToBackend = async () => {
     const uid = getUserId();
     if (!uid) return;
     setSettingsSaving(true);
     setBackendError('');
     try {
-      const payload = {
-        currency: settings.currency,
-        language: settings.language,
-        theme: settings.theme,
-        notifications: settings.notifications
-      };
+      // If backend wants ONLY the 3 preference fields, replace buildFullSettingsPayload() with buildPreferencesPayload()
+      const payload = buildFullSettingsPayload();
+      console.log('Sending settings payload to backend:', JSON.stringify(payload, null, 2));
+
       const res = await fetch(ENDPOINTS.settingsUpdate(uid), {
         method: 'PUT',
         headers: authHeaders(),
@@ -302,15 +331,39 @@ const Settings = ({ onBackToLanding }) => {
       });
       const body = await res.json().catch(()=>({}));
       if (!res.ok) throw new Error(body.message || 'Settings update failed');
-      localStorage.setItem('selectedCurrency', settings.currency);
+
+      // Persist locally
+      localStorage.setItem('selectedCurrency', payload.currency);
       localStorage.setItem('userSettings', JSON.stringify(payload));
-      setShowSuccessMessage('Settings saved (server)!');
+
+      setShowSuccessMessage('Preferences saved (server)!');
     } catch (e) {
       setBackendError(e.message);
       setShowSuccessMessage('');
     } finally {
       setSettingsSaving(false);
       setTimeout(()=> setShowSuccessMessage(''), 3000);
+    }
+  };
+
+  // QUICK CALL: dedicated minimal save if you need to trigger immediately on change
+  const saveBasicPreferencesToBackend = async () => {
+    const uid = getUserId();
+    if (!uid) return;
+    try {
+      const prefs = buildPreferencesPayload();
+      console.log('Sending basic preferences:', JSON.stringify(prefs));
+      await fetch(ENDPOINTS.settingsUpdate(uid), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify(prefs)
+      });
+      localStorage.setItem('selectedCurrency', prefs.currency);
+      // merge into existing userSettings if present
+      const existing = JSON.parse(localStorage.getItem('userSettings') || '{}');
+      localStorage.setItem('userSettings', JSON.stringify({ ...existing, ...prefs }));
+    } catch (err) {
+      console.warn('Failed to auto-save basic preferences', err);
     }
   };
 
