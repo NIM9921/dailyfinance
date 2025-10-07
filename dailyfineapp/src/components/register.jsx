@@ -8,26 +8,54 @@ const Register = ({ onBackToLogin }) => {
     email: '',
     password: '',
     confirmPassword: '',
-    telephone: ''
+    telephone: '',
+    dateOfBirth: '',
+    gender: '',
+    country: '',
+    designation: '',
+    averageMonthlyIncome: '',
+    civilStatus: '',
+    profileImage: '',
+    currency: localStorage.getItem('selectedCurrency') || 'Rs',
+    language: 'English',
+    theme: 'light',
+    budgetAlerts: true,
+    emailNotifications: true,
+    pushNotifications: false
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
 
+  const currencyOptions = ['Rs','₹','$', '€', '£'];
+  const languageOptions = ['English','Hindi','Spanish','French','German'];
+  const themeOptions = ['light','dark','auto'];
+
   const handleChange = (e) => {
-    const { name, value } = e.target;
+    const { name, value, type, checked } = e.target;
     setFormData(prev => ({
       ...prev,
-      [name]: value
+      [name]: type === 'checkbox' ? checked : value
     }));
-    // Clear error when user starts typing
     if (errors[name]) {
-      setErrors(prev => ({
-        ...prev,
-        [name]: ''
-      }));
+      setErrors(prev => ({ ...prev, [name]: '' }));
     }
+  };
+
+  const handleImageSelected = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!/^image\//.test(file.type)) {
+      setErrors(prev => ({ ...prev, profileImage: 'Invalid image type' }));
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFormData(prev => ({ ...prev, profileImage: reader.result }));
+      setErrors(prev => ({ ...prev, profileImage: '' }));
+    };
+    reader.readAsDataURL(file);
   };
 
   const validateForm = () => {
@@ -61,6 +89,14 @@ const Register = ({ onBackToLogin }) => {
       newErrors.telephone = 'Please enter a valid telephone number';
     }
 
+    if (!formData.dateOfBirth) newErrors.dateOfBirth = 'Date of birth required';
+    if (!formData.gender) newErrors.gender = 'Gender required';
+    if (!formData.country.trim()) newErrors.country = 'Country required';
+    if (!formData.designation.trim()) newErrors.designation = 'Designation required';
+    if (formData.averageMonthlyIncome === '' || Number(formData.averageMonthlyIncome) <= 0)
+      newErrors.averageMonthlyIncome = 'Income must be > 0';
+    if (!formData.civilStatus) newErrors.civilStatus = 'Civil status required';
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -79,13 +115,30 @@ const Register = ({ onBackToLogin }) => {
       name: formData.name.trim(),
       email: formData.email.trim().toLowerCase(),
       password: formData.password,
-      telephone: formData.telephone.trim()
+      telephone: formData.telephone.trim(),
+      dateOfBirth: formData.dateOfBirth,
+      gender: formData.gender,
+      country: formData.country.trim(),
+      designation: formData.designation.trim(),
+      averageMonthlyIncome: Number(formData.averageMonthlyIncome),
+      civilStatus: formData.civilStatus,
+      profileImage: formData.profileImage || '',
+      settings: {
+        currency: formData.currency,
+        language: formData.language,
+        theme: formData.theme,
+        notifications: {
+          budgetAlerts: formData.budgetAlerts,
+          emailNotifications: formData.emailNotifications,
+          pushNotifications: formData.pushNotifications
+        }
+      }
     };
 
     try {
       console.log('Sending registration data to backend:', JSON.stringify(registrationData, null, 2));
       
-      const response = await fetch('http://localhost:5000/api/register', {
+      const response = await fetch('http://localhost:5000/api/users', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -100,11 +153,12 @@ const Register = ({ onBackToLogin }) => {
         
         // Reset form
         setFormData({
-          name: '',
-          email: '',
-          password: '',
-          confirmPassword: '',
-          telephone: ''
+          name: '', email: '', password: '', confirmPassword: '', telephone: '',
+          dateOfBirth: '', gender: '', country: '', designation: '',
+          averageMonthlyIncome: '', civilStatus: '', profileImage: '',
+          currency: registrationData.settings.currency,
+          language: 'English', theme: 'light',
+          budgetAlerts: true, emailNotifications: true, pushNotifications: false
         });
         
         // Redirect to login after success
@@ -289,17 +343,197 @@ const Register = ({ onBackToLogin }) => {
               </div>
               {errors.confirmPassword && <p className="mt-1 text-sm text-red-600">{errors.confirmPassword}</p>}
             </div>
+
+            {/* Profile Details */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-violet-700 mb-1">Date of Birth</label>
+                <input
+                  type="date"
+                  name="dateOfBirth"
+                  value={formData.dateOfBirth}
+                  onChange={handleChange}
+                  className={`w-full rounded-lg px-3 py-2 border ${errors.dateOfBirth ? 'border-red-500' : 'border-violet-300'} focus:ring-violet-500 focus:border-violet-500`}
+                />
+                {errors.dateOfBirth && <p className="mt-1 text-xs text-red-600">{errors.dateOfBirth}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-violet-700 mb-1">Gender</label>
+                <select
+                  name="gender"
+                  value={formData.gender}
+                  onChange={handleChange}
+                  className={`w-full rounded-lg px-3 py-2 border ${errors.gender ? 'border-red-500' : 'border-violet-300'} focus:ring-violet-500 focus:border-violet-500`}
+                >
+                  <option value="">Select</option>
+                  <option value="female">Female</option>
+                  <option value="male">Male</option>
+                  <option value="nonbinary">Non-binary</option>
+                  <option value="other">Other</option>
+                  <option value="prefer_not_say">Prefer not to say</option>
+                </select>
+                {errors.gender && <p className="mt-1 text-xs text-red-600">{errors.gender}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-violet-700 mb-1">Country</label>
+                <input
+                  type="text"
+                  name="country"
+                  value={formData.country}
+                  onChange={handleChange}
+                  className={`w-full rounded-lg px-3 py-2 border ${errors.country ? 'border-red-500' : 'border-violet-300'} focus:ring-violet-500 focus:border-violet-500`}
+                  placeholder="Country"
+                />
+                {errors.country && <p className="mt-1 text-xs text-red-600">{errors.country}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-violet-700 mb-1">Designation</label>
+                <input
+                  type="text"
+                  name="designation"
+                  value={formData.designation}
+                  onChange={handleChange}
+                  className={`w-full rounded-lg px-3 py-2 border ${errors.designation ? 'border-red-500' : 'border-violet-300'} focus:ring-violet-500 focus:border-violet-500`}
+                  placeholder="Job Title"
+                />
+                {errors.designation && <p className="mt-1 text-xs text-red-600">{errors.designation}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-violet-700 mb-1">Avg Monthly Income</label>
+                <input
+                  type="number"
+                  name="averageMonthlyIncome"
+                  min="0"
+                  step="0.01"
+                  value={formData.averageMonthlyIncome}
+                  onChange={handleChange}
+                  className={`w-full rounded-lg px-3 py-2 border ${errors.averageMonthlyIncome ? 'border-red-500' : 'border-violet-300'} focus:ring-violet-500 focus:border-violet-500`}
+                  placeholder="0.00"
+                />
+                {errors.averageMonthlyIncome && <p className="mt-1 text-xs text-red-600">{errors.averageMonthlyIncome}</p>}
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-violet-700 mb-1">Civil Status</label>
+                <select
+                  name="civilStatus"
+                  value={formData.civilStatus}
+                  onChange={handleChange}
+                  className={`w-full rounded-lg px-3 py-2 border ${errors.civilStatus ? 'border-red-500' : 'border-violet-300'} focus:ring-violet-500 focus:border-violet-500`}
+                >
+                  <option value="">Select</option>
+                  <option value="single">Single</option>
+                  <option value="married">Married</option>
+                  <option value="widowed">Widowed</option>
+                  <option value="divorced">Divorced</option>
+                  <option value="separated">Separated</option>
+                  <option value="other">Other</option>
+                </select>
+                {errors.civilStatus && <p className="mt-1 text-xs text-red-600">{errors.civilStatus}</p>}
+              </div>
+            </div>
+
+            {/* Profile Image */}
+            <div>
+              <label className="block text-sm font-medium text-violet-700 mb-1">Profile Image (optional)</label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageSelected}
+                className="w-full text-sm"
+              />
+              {formData.profileImage && (
+                <div className="mt-2">
+                  <img
+                    src={formData.profileImage}
+                    alt="preview"
+                    className="h-20 w-20 object-cover rounded-full border"
+                  />
+                </div>
+              )}
+              {errors.profileImage && <p className="mt-1 text-xs text-red-600">{errors.profileImage}</p>}
+            </div>
+
+            {/* Settings / Preferences */}
+            <div className="border-t pt-4 space-y-4">
+              <h4 className="text-sm font-semibold text-violet-800">Preferences</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                  <label className="block text-xs font-medium text-violet-600 mb-1">Currency</label>
+                  <select
+                    name="currency"
+                    value={formData.currency}
+                    onChange={handleChange}
+                    className="w-full rounded-lg px-3 py-2 border border-violet-300 focus:ring-violet-500 focus:border-violet-500 text-sm"
+                  >
+                    {currencyOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-violet-600 mb-1">Language</label>
+                  <select
+                    name="language"
+                    value={formData.language}
+                    onChange={handleChange}
+                    className="w-full rounded-lg px-3 py-2 border border-violet-300 focus:ring-violet-500 focus:border-violet-500 text-sm"
+                  >
+                    {languageOptions.map(l => <option key={l} value={l}>{l}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-violet-600 mb-1">Theme</label>
+                  <select
+                    name="theme"
+                    value={formData.theme}
+                    onChange={handleChange}
+                    className="w-full rounded-lg px-3 py-2 border border-violet-300 focus:ring-violet-500 focus:border-violet-500 text-sm"
+                  >
+                    {themeOptions.map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-4">
+                <label className="inline-flex items-center space-x-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="budgetAlerts"
+                    checked={formData.budgetAlerts}
+                    onChange={handleChange}
+                    className="rounded text-violet-600 focus:ring-violet-500"
+                  />
+                  <span>Budget Alerts</span>
+                </label>
+                <label className="inline-flex items-center space-x-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="emailNotifications"
+                    checked={formData.emailNotifications}
+                    onChange={handleChange}
+                    className="rounded text-violet-600 focus:ring-violet-500"
+                  />
+                  <span>Email Notifications</span>
+                </label>
+                <label className="inline-flex items-center space-x-2 text-sm">
+                  <input
+                    type="checkbox"
+                    name="pushNotifications"
+                    checked={formData.pushNotifications}
+                    onChange={handleChange}
+                    className="rounded text-violet-600 focus:ring-violet-500"
+                  />
+                  <span>Push Notifications</span>
+                </label>
+              </div>
+            </div>
           </div>
 
           <div>
             <button
               type="submit"
               disabled={isLoading}
-              className={`group relative w-full flex justify-center py-3 px-4 border border-transparent text-sm font-medium rounded-lg text-white ${
-                isLoading 
-                  ? 'bg-violet-400 cursor-not-allowed' 
-                  : 'bg-violet-600 hover:bg-violet-700 hover:scale-105'
-              } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500 transition duration-200 ease-in-out transform`}
+              className={`group relative w-full flex justify-center py-3 px-4 rounded-lg text-sm font-medium text-white ${
+                isLoading ? 'bg-violet-400 cursor-not-allowed'
+                        : 'bg-violet-600 hover:bg-violet-700'
+              } focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-violet-500 transition`}
             >
               {isLoading ? 'Creating Account...' : 'Create Account'}
             </button>
