@@ -22,7 +22,41 @@ const LandingPage = ({ onLogout }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [activeTransactionTab, setActiveTransactionTab] = useState('income');
-  const [currency, setCurrency] = useState(() => localStorage.getItem('selectedCurrency') || '$'); // changed: lazy init from storage
+  const [currency, setCurrency] = useState(() => localStorage.getItem('selectedCurrency') || '$'); // changed previously
+  const [monthlySummary, setMonthlySummary] = useState({
+    income: 0,
+    expenses: 0,
+    totalBalance: 0,
+    loading: true,
+    error: ''
+  }); // NEW
+
+  const formatMoney = (v) =>
+    `${currency}${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`; // NEW
+
+  const fetchMonthlySummary = async () => { // NEW
+    setMonthlySummary(prev => ({ ...prev, loading: true, error: '' }));
+    try {
+      const res = await fetch('http://localhost:5000/api/transactions/monthly-summary', {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+        }
+      });
+      if (!res.ok) throw new Error(`Status ${res.status}`);
+      const json = await res.json().catch(() => ({}));
+      const data = json.data || {};
+      setMonthlySummary({
+        income: data.income ?? 0,
+        expenses: data.expenses ?? 0,
+        totalBalance: data.totalBalance ?? ((data.income || 0) - (data.expenses || 0)),
+        loading: false,
+        error: ''
+      });
+    } catch (e) {
+      setMonthlySummary(prev => ({ ...prev, loading: false, error: 'Failed to load monthly summary' }));
+    }
+  };
 
   useEffect(() => {
     // Get user data from localStorage
@@ -35,7 +69,10 @@ const LandingPage = ({ onLogout }) => {
     setCurrency(cur);
     const h = (e) => setCurrency(e.detail?.currency || localStorage.getItem('selectedCurrency') || '$');
     window.addEventListener('app:settings-updated', h);
-    return () => window.removeEventListener('app:settings-updated', h);
+    fetchMonthlySummary(); // NEW
+    return () => {
+      window.removeEventListener('app:settings-updated', h);
+    };
   }, []);
 
   const handleLogout = () => {
@@ -212,6 +249,13 @@ const LandingPage = ({ onLogout }) => {
           </div>
         </div>
 
+        {/* Optional error banner for summary */}
+        {monthlySummary.error && (
+          <div className="mb-4 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2 rounded-lg">
+            {monthlySummary.error}
+          </div>
+        )}
+
         {/* Dashboard Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6 lg:gap-8 mb-6 md:mb-10">
           {/* Total Balance Card */}
@@ -227,7 +271,7 @@ const LandingPage = ({ onLogout }) => {
                       Total Balance
                     </dt>
                     <dd className="text-lg md:text-xl lg:text-2xl font-bold text-gray-900 mt-1">
-                      {currency}12,345.67
+                      {monthlySummary.loading ? '...' : formatMoney(monthlySummary.totalBalance)}
                     </dd>
                   </dl>
                 </div>
@@ -248,7 +292,7 @@ const LandingPage = ({ onLogout }) => {
                       Monthly Income
                     </dt>
                     <dd className="text-lg md:text-xl lg:text-2xl font-bold text-gray-900 mt-1">
-                      {currency}5,420.00
+                      {monthlySummary.loading ? '...' : formatMoney(monthlySummary.income)}
                     </dd>
                   </dl>
                 </div>
@@ -269,7 +313,7 @@ const LandingPage = ({ onLogout }) => {
                       Monthly Expenses
                     </dt>
                     <dd className="text-lg md:text-xl lg:text-2xl font-bold text-gray-900 mt-1">
-                      {currency}2,840.35
+                      {monthlySummary.loading ? '...' : formatMoney(monthlySummary.expenses)}
                     </dd>
                   </dl>
                 </div>
@@ -277,7 +321,7 @@ const LandingPage = ({ onLogout }) => {
             </div>
           </div>
 
-          {/* Savings Card */}
+          {/* Savings Card (unchanged placeholder) */}
           <div className="bg-white overflow-hidden shadow-lg rounded-xl hover:shadow-xl transition-shadow duration-300">
             <div className="p-4 md:p-6 lg:p-8">
               <div className="flex items-center">
