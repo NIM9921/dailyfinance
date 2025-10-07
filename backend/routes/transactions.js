@@ -474,4 +474,69 @@ router.get('/test/user/:userId', async (req, res) => {
   }
 });
 
+// @route   GET /api/transactions/monthly-summary?month=YYYY-MM
+// @desc    Get monthly income, expenses, and total balance for logged in user
+// @access  Private
+router.get('/monthly-summary', authMiddleware, async (req, res) => {
+  try {
+    const userId = req.userId;
+    const { month } = req.query; // format YYYY-MM
+    let year, mon;
+
+    if (month) {
+      const match = /^(\d{4})-(\d{2})$/.exec(month);
+      if (!match) {
+        return res.status(400).json({ success: false, message: 'Invalid month format. Use YYYY-MM' });
+      }
+      year = parseInt(match[1], 10);
+      mon = parseInt(match[2], 10); // 1-12
+    } else {
+      const now = new Date();
+      year = now.getFullYear();
+      mon = now.getMonth() + 1;
+    }
+
+    const startDate = new Date(year, mon - 1, 1, 0, 0, 0, 0);
+    const endDate = new Date(year, mon, 0, 23, 59, 59, 999); // last day of month
+
+    const results = await Transaction.aggregate([
+      {
+        $match: {
+          user: new mongoose.Types.ObjectId(userId),
+          date: { $gte: startDate, $lte: endDate }
+        }
+      },
+      {
+        $group: {
+          _id: '$type',
+          total: { $sum: '$amount' }
+        }
+      }
+    ]);
+
+    let income = 0;
+    let expenses = 0;
+    results.forEach(r => {
+      if (r._id === 'income') income = r.total;
+      if (r._id === 'expense') expenses = r.total;
+    });
+
+    const totalBalance = income - expenses;
+
+    return res.json({
+      success: true,
+      data: {
+        month: `${year}-${String(mon).padStart(2, '0')}`,
+        income: Number(income.toFixed(2)),
+        expenses: Number(expenses.toFixed(2)),
+        totalBalance: Number(totalBalance.toFixed(2)),
+        range: { startDate, endDate }
+      }
+    });
+  } catch (e) {
+    console.error('Monthly summary error:', e);
+    return res.status(500).json({ success: false, message: 'Server error', error: e.message });
+  }
+});
+
 module.exports = router;
