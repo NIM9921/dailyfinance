@@ -28,13 +28,26 @@ const Report = ({ onBackToLanding }) => {
     overBudgetCategories: [],
     warningCategories: []
   });
-  const [currency, setCurrency] = useState('₹');
+  const [currency, setCurrency] = useState(() => localStorage.getItem('selectedCurrency') || '$'); // lazy init
   const [chartData, setChartData] = useState([]);
 
   useEffect(() => {
     const storedUserData = localStorage.getItem('userData');
     const storedToken = localStorage.getItem('authToken');
-    const savedCurrency = localStorage.getItem('selectedCurrency') || '₹';
+    const savedCurrency = localStorage.getItem('selectedCurrency') || '$';
+    setCurrency(savedCurrency);
+    const h = (e) => {
+      const c = e.detail?.currency || localStorage.getItem('selectedCurrency') || '$';
+      setCurrency(c);
+    };
+    window.addEventListener('app:settings-updated', h);
+    return () => window.removeEventListener('app:settings-updated', h);
+  }, []);
+
+  useEffect(() => {
+    const storedUserData = localStorage.getItem('userData');
+    const storedToken = localStorage.getItem('authToken');
+    const savedCurrency = localStorage.getItem('selectedCurrency') || '$'; // changed fallback
     setCurrency(savedCurrency);
 
     if (storedUserData) {

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import {
   faArrowLeft,
@@ -19,16 +19,25 @@ import {
   faCheckCircle
 } from '@fortawesome/free-solid-svg-icons';
 
+// ADD: explicit backend base (was using relative paths -> hitting Vite 5173)
+const API_BASE = 'http://localhost:5000';
+
 const Settings = ({ onBackToLanding }) => {
   const [activeTab, setActiveTab] = useState('profile');
   const [userData, setUserData] = useState({
     name: '',
     email: '',
     telephone: '',
-    profileImage: null
+    profileImage: null,
+    dateOfBirth: '',
+    gender: '',
+    country: '',
+    designation: '',
+    averageMonthlyIncome: '',
+    civilStatus: ''
   });
-  const [settings, setSettings] = useState({
-    currency: '₹',
+  const [settings, setSettings] = useState(() => ({
+    currency: localStorage.getItem('selectedCurrency') || '$',
     language: 'English',
     theme: 'light',
     notifications: {
@@ -36,7 +45,7 @@ const Settings = ({ onBackToLanding }) => {
       emailNotifications: true,
       pushNotifications: false
     }
-  });
+  }));
   const [passwordData, setPasswordData] = useState({
     currentPassword: '',
     newPassword: '',
@@ -51,6 +60,21 @@ const Settings = ({ onBackToLanding }) => {
   const [errors, setErrors] = useState({});
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [showSuccessMessage, setShowSuccessMessage] = useState('');
+
+  // BACKEND INTEGRATION STATE (new)
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileSaving, setProfileSaving] = useState(false);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [passwordSaving, setPasswordSaving] = useState(false);
+  const [deletingAccount, setDeletingAccount] = useState(false);
+  const [backendError, setBackendError] = useState('');
+  const [backendReady, setBackendReady] = useState(false);
+
+  const [imageUploading, setImageUploading] = useState(false);
+  const [imageError, setImageError] = useState('');
+  const [newImageFile, setNewImageFile] = useState(null);
+  const fileInputRef = useRef(null);
 
   // Currency options
   const currencyOptions = [
@@ -80,21 +104,61 @@ const Settings = ({ onBackToLanding }) => {
     loadSettings();
   }, []);
 
+  // Utility: get auth & userId
+  const getAuthToken = () => localStorage.getItem('authToken') || '';
+  const getUserId = () => {
+    try {
+      const raw = localStorage.getItem('userData');
+      if (raw) {
+        const u = JSON.parse(raw);
+        return u.id || u._id || u.data?.id || null;
+      }
+      const tok = getAuthToken();
+      if (tok && tok.split('.').length === 3) {
+        const payload = JSON.parse(atob(tok.split('.')[1]));
+        return payload.userId || null;
+      }
+    } catch { /* ignore */ }
+    return null;
+  };
+
+  const authHeaders = () => ({
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${getAuthToken()}`
+  });
+
+  // UPDATED: all endpoints now absolute (previously relative -> 5173)
+  const ENDPOINTS = {
+    profileGet:    (uid) => `${API_BASE}/api/users/${uid}`,
+    profileUpdate: (uid) => `${API_BASE}/api/users/${uid}`,
+    settingsGet:   (uid) => `${API_BASE}/api/users/${uid}/settings`,
+    settingsUpdate:(uid) => `${API_BASE}/api/users/${uid}/settings`,
+    passwordUpdate:(uid) => `${API_BASE}/api/users/${uid}/password`,
+    deleteAccount: (uid) => `${API_BASE}/api/users/${uid}`
+  };
+
   const loadUserData = () => {
     const storedUserData = localStorage.getItem('userData');
     if (storedUserData) {
       const user = JSON.parse(storedUserData);
-      setUserData({
+      setUserData(prev => ({
+        ...prev,
         name: user.name || '',
         email: user.email || '',
         telephone: user.telephone || '',
-        profileImage: user.profileImage || null
-      });
+        profileImage: user.profileImage || null,
+        dateOfBirth: user.dateOfBirth || user.dob || '',
+        gender: user.gender || '',
+        country: user.country || '',
+        designation: user.designation || '',
+        averageMonthlyIncome: user.averageMonthlyIncome || user.avgIncome || '',
+        civilStatus: user.civilStatus || user.maritalStatus || ''
+      }));
     }
   };
 
   const loadSettings = () => {
-    const savedCurrency = localStorage.getItem('selectedCurrency') || '₹';
+    const savedCurrency = localStorage.getItem('selectedCurrency') || '$'; // fallback changed
     const savedSettings = localStorage.getItem('userSettings');
     
     if (savedSettings) {
@@ -108,6 +172,264 @@ const Settings = ({ onBackToLanding }) => {
       setSettings(prev => ({ ...prev, currency: savedCurrency }));
     }
   };
+
+  const fetchProfileFromBackend = async () => {
+    const uid = getUserId();
+    if (!uid) return;
+    setProfileLoading(true);
+    setBackendError('');
+    try {
+      const res = await fetch(ENDPOINTS.profileGet(uid), { headers: authHeaders() });
+      if (!res.ok) throw new Error(`Profile fetch failed: ${res.status}`);
+      const data = await res.json();
+
+      // NEW: support shape { success, user: { ... } }
+      const u = data.user ? data.user : data; // fallback to previous shape
+      const isoDob = u.dateOfBirth || u.dob || '';
+      const dobForInput = isoDob
+        ? new Date(isoDob).toISOString().split('T')[0]
+        : '';
+
+      setUserData(prev => ({
+        ...prev,
+        name: u.name ?? prev.name,
+        email: u.email ?? prev.email,
+        telephone: u.telephone ?? prev.telephone,
+        profileImage: u.profileImage || u.image || u.avatar || prev.profileImage,
+        dateOfBirth: dobForInput || prev.dateOfBirth,
+        gender: u.gender ?? prev.gender,
+        country: u.country ?? prev.country,
+        designation: u.designation ?? prev.designation,
+        averageMonthlyIncome: (u.averageMonthlyIncome !== undefined
+          ? u.averageMonthlyIncome
+          : u.avgIncome) ?? prev.averageMonthlyIncome,
+        civilStatus: u.civilStatus || u.maritalStatus || prev.civilStatus
+      }));
+    } catch (e) {
+      console.warn('Profile backend load failed, using local storage fallback.', e);
+    } finally {
+      setProfileLoading(false);
+    }
+  };
+
+  const fetchSettingsFromBackend = async () => {
+    const uid = getUserId();
+    if (!uid) return;
+    setSettingsLoading(true);
+    setBackendError('');
+    try {
+      const res = await fetch(ENDPOINTS.settingsGet(uid), { headers: authHeaders() });
+      if (!res.ok) throw new Error(`Settings fetch failed: ${res.status}`);
+      const data = await res.json();
+
+      // UPDATED: handle nested { success, settings: { ... } }
+      const src = data.settings ? data.settings : data;
+
+      const updated = {
+        currency: src.currency || '$',
+        language: src.language ?? settings.language,
+        theme: src.theme ?? settings.theme,
+        notifications: {
+          budgetAlerts: src.notifications?.budgetAlerts ?? settings.notifications.budgetAlerts,
+          emailNotifications: src.notifications?.emailNotifications ?? settings.notifications.emailNotifications,
+          pushNotifications: src.notifications?.pushNotifications ?? settings.notifications.pushNotifications
+        }
+      };
+      setSettings(updated);
+      localStorage.setItem('selectedCurrency', updated.currency);
+      localStorage.setItem('userSettings', JSON.stringify(updated));
+      window.dispatchEvent(new CustomEvent('app:settings-updated', { detail: updated }));
+    } catch (e) {
+      console.warn('Settings backend load failed, using local fallback.', e);
+    } finally {
+      setSettingsLoading(false);
+    }
+  };
+
+  const buildProfilePayload = () => {
+    const payload = {
+      name: userData.name.trim(),
+      email: userData.email.trim(),
+      telephone: userData.telephone.trim(),
+      dateOfBirth: userData.dateOfBirth || '',
+      gender: userData.gender || '',
+      country: userData.country || '',
+      designation: userData.designation || '',
+      averageMonthlyIncome: userData.averageMonthlyIncome === '' ? 0 : Number(userData.averageMonthlyIncome),
+      civilStatus: userData.civilStatus || '',
+      profileImage: userData.profileImage || ''
+    };
+    return payload;
+  };
+
+  const saveProfileToBackend = async () => {
+    if (!validateProfileForm()) return;
+    const uid = getUserId();
+    if (!uid) return;
+    setProfileSaving(true);
+    setBackendError('');
+    try {
+      const payload = buildProfilePayload();
+      // CHANGED: use ENDPOINTS.profileUpdate (was relative fetch -> wrong port)
+      const res = await fetch(ENDPOINTS.profileUpdate(uid), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify(payload)
+      });
+      const body = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(body.message || 'Profile update failed');
+      localStorage.setItem('userData', JSON.stringify({ ...userData, ...payload }));
+      setNewImageFile(null);
+      setShowSuccessMessage('Profile updated successfully (server)!');
+    } catch (e) {
+      setBackendError(e.message);
+      setShowSuccessMessage('');
+    } finally {
+      setProfileSaving(false);
+      setTimeout(()=> setShowSuccessMessage(''), 3000);
+    }
+  };
+
+  // Helper: build preferences payload (only what backend needs for display prefs)
+  const buildPreferencesPayload = () => ({
+    currency: settings.currency || '$', // safeguard
+    language: settings.language,
+    theme: settings.theme
+  });
+
+  // OPTIONAL: full settings payload (if backend still wants notifications together)
+  const buildFullSettingsPayload = () => ({
+    ...buildPreferencesPayload(),
+    notifications: settings.notifications
+  });
+
+  /**
+   * saveSettingsToBackend
+   * Sends ONLY currency, language, theme (+ notifications if your backend already expects them).
+   * Adjust to buildPreferencesPayload() if backend wants ONLY those 3 fields.
+   * Request:
+   *  PUT ${API_BASE}/api/users/:id/settings
+   *  Body (JSON):
+   *    {
+   *      "currency": "₹",
+   *      "language": "English",
+   *      "theme": "light",
+   *      "notifications": {
+   *        "budgetAlerts": true,
+   *        "emailNotifications": true,
+   *        "pushNotifications": false
+   *      }
+   *    }
+   */
+  const saveSettingsToBackend = async () => {
+    const uid = getUserId();
+    if (!uid) return;
+    setSettingsSaving(true);
+    setBackendError('');
+    try {
+      const payload = buildFullSettingsPayload(); // or buildPreferencesPayload()
+      console.log('Sending settings payload to backend:', JSON.stringify(payload, null, 2));
+      const res = await fetch(ENDPOINTS.settingsUpdate(uid), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify(payload)
+      });
+      const body = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(body.message || 'Settings update failed');
+      localStorage.setItem('selectedCurrency', payload.currency);
+      localStorage.setItem('userSettings', JSON.stringify(payload));
+      // ADDED: broadcast update
+      window.dispatchEvent(new CustomEvent('app:settings-updated', { detail: payload }));
+      setShowSuccessMessage('Preferences saved (server)!');
+    } catch (e) {
+      setBackendError(e.message);
+      setShowSuccessMessage('');
+    } finally {
+      setSettingsSaving(false);
+      setTimeout(()=> setShowSuccessMessage(''), 3000);
+    }
+  };
+
+  // QUICK CALL: dedicated minimal save if you need to trigger immediately on change
+  const saveBasicPreferencesToBackend = async () => {
+    const uid = getUserId();
+    if (!uid) return;
+    try {
+      const prefs = buildPreferencesPayload();
+      console.log('Sending basic preferences:', JSON.stringify(prefs));
+      await fetch(ENDPOINTS.settingsUpdate(uid), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify(prefs)
+      });
+      localStorage.setItem('selectedCurrency', prefs.currency);
+      // merge into existing userSettings if present
+      const existing = JSON.parse(localStorage.getItem('userSettings') || '{}');
+      localStorage.setItem('userSettings', JSON.stringify({ ...existing, ...prefs }));
+    } catch (err) {
+      console.warn('Failed to auto-save basic preferences', err);
+    }
+  };
+
+  const updatePasswordBackend = async () => {
+    if (!validatePasswordForm()) return;
+    const uid = getUserId();
+    if (!uid) return;
+    setPasswordSaving(true);
+    setBackendError('');
+    try {
+      const res = await fetch(ENDPOINTS.passwordUpdate(uid), {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          currentPassword: passwordData.currentPassword,
+          newPassword: passwordData.newPassword
+        })
+      });
+      const body = await res.json().catch(()=>({}));
+      if (!res.ok) throw new Error(body.message || 'Password update failed');
+      setPasswordData({ currentPassword: '', newPassword: '', confirmPassword: '' });
+      setShowSuccessMessage('Password updated successfully (server)!');
+    } catch (e) {
+      setBackendError(e.message);
+      setShowSuccessMessage('');
+    } finally {
+      setPasswordSaving(false);
+      setTimeout(()=> setShowSuccessMessage(''), 3000);
+    }
+  };
+
+  const deleteAccountBackend = async () => {
+    const uid = getUserId();
+    if (!uid) return;
+    setDeletingAccount(true);
+    setBackendError('');
+    try {
+      const res = await fetch(ENDPOINTS.deleteAccount(uid), {
+        method: 'DELETE',
+        headers: authHeaders()
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(()=>({}));
+        throw new Error(body.message || 'Account deletion failed');
+      }
+      localStorage.clear();
+      onBackToLanding();
+    } catch (e) {
+      setBackendError(e.message);
+    } finally {
+      setDeletingAccount(false);
+      setShowDeleteModal(false);
+    }
+  };
+
+  useEffect(() => {
+    (async () => {
+      await Promise.all([fetchProfileFromBackend(), fetchSettingsFromBackend()]);
+      setBackendReady(true);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleUserDataChange = (field, value) => {
     setUserData(prev => ({ ...prev, [field]: value }));
@@ -139,21 +461,10 @@ const Settings = ({ onBackToLanding }) => {
 
   const validateProfileForm = () => {
     const newErrors = {};
-    
-    if (!userData.name.trim()) {
-      newErrors.name = 'Name is required';
-    }
-    
-    if (!userData.email.trim()) {
-      newErrors.email = 'Email is required';
-    } else if (!/\S+@\S+\.\S+/.test(userData.email)) {
-      newErrors.email = 'Email is invalid';
-    }
-    
-    if (!userData.telephone.trim()) {
-      newErrors.telephone = 'Phone number is required';
-    }
-    
+    if (!userData.name.trim()) newErrors.name = 'Name is required';
+    if (!userData.email.trim()) newErrors.email = 'Email is required';
+    else if (!/\S+@\S+\.\S+/.test(userData.email)) newErrors.email = 'Email is invalid';
+    if (!userData.telephone.trim()) newErrors.telephone = 'Phone number is required';
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -179,91 +490,94 @@ const Settings = ({ onBackToLanding }) => {
     return Object.keys(newErrors).length === 0;
   };
 
-  const handleProfileUpdate = async () => {
-    if (!validateProfileForm()) return;
-    
-    setIsLoading(true);
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      // Update localStorage
-      localStorage.setItem('userData', JSON.stringify(userData));
-      
-      setShowSuccessMessage('Profile updated successfully!');
-      setTimeout(() => setShowSuccessMessage(''), 3000);
-    } catch (error) {
-      console.error('Error updating profile:', error);
-    } finally {
-      setIsLoading(false);
+  const triggerImagePicker = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImageSelected = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    const validTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif'];
+    if (!validTypes.includes(file.type)) {
+      setImageError('Please select a valid image file (PNG, JPEG, WEBP, or GIF)');
+      return;
     }
-  };
 
-  const handlePasswordUpdate = async () => {
-    if (!validatePasswordForm()) return;
-    
-    setIsLoading(true);
-    try {
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      setPasswordData({
-        currentPassword: '',
-        newPassword: '',
-        confirmPassword: ''
-      });
-      
-      setShowSuccessMessage('Password updated successfully!');
-      setTimeout(() => setShowSuccessMessage(''), 3000);
-    } catch (error) {
-      console.error('Error updating password:', error);
-    } finally {
-      setIsLoading(false);
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      setImageError('Image size must be less than 5MB');
+      return;
     }
-  };
 
-  const handleSettingsUpdate = () => {
-    // Update localStorage
-    localStorage.setItem('selectedCurrency', settings.currency);
-    localStorage.setItem('userSettings', JSON.stringify({
-      language: settings.language,
-      theme: settings.theme,
-      notifications: settings.notifications
-    }));
-    
-    setShowSuccessMessage('Settings saved successfully!');
-    setTimeout(() => setShowSuccessMessage(''), 3000);
-  };
+    setImageError('');
+    setImageUploading(true);
 
-  const handleAccountDelete = () => {
-    setShowDeleteModal(true);
-  };
-
-  const confirmAccountDelete = () => {
-    // Clear all data and logout
-    localStorage.clear();
-    setShowDeleteModal(false);
-    onBackToLanding();
+    try {
+      // Convert to base64
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = reader.result;
+        setUserData(prev => ({ ...prev, profileImage: base64String }));
+        setNewImageFile(file);
+        setImageUploading(false);
+      };
+      reader.onerror = () => {
+        setImageError('Failed to read image file');
+        setImageUploading(false);
+      };
+      reader.readAsDataURL(file);
+    } catch (error) {
+      setImageError('Failed to process image');
+      setImageUploading(false);
+    }
   };
 
   const ProfileTab = () => (
     <div className="space-y-6">
+      {/* Profile Image Section */}
       <div className="flex items-center space-x-4">
         <div className="relative">
-          <div className="w-20 h-20 bg-violet-100 rounded-full flex items-center justify-center">
+          <div className="w-20 h-20 bg-violet-100 rounded-full flex items-center justify-center overflow-hidden">
             {userData.profileImage ? (
-              <img src={userData.profileImage} alt="Profile" className="w-20 h-20 rounded-full object-cover" />
+              <img
+                src={userData.profileImage}
+                alt="Profile"
+                className="w-20 h-20 object-cover"
+              />
             ) : (
               <FontAwesomeIcon icon={faUser} className="h-8 w-8 text-violet-600" />
             )}
+            {imageUploading && (
+              <div className="absolute inset-0 bg-white/70 flex items-center justify-center text-xs text-violet-700">
+                Uploading...
+              </div>
+            )}
           </div>
-          <button className="absolute bottom-0 right-0 bg-violet-600 text-white p-1.5 rounded-full hover:bg-violet-700">
+          <button
+            type="button"
+            onClick={triggerImagePicker}
+            className="absolute bottom-0 right-0 bg-violet-600 text-white p-1.5 rounded-full hover:bg-violet-700 disabled:opacity-50"
+            disabled={imageUploading || profileSaving}
+            title="Upload profile image"
+          >
             <FontAwesomeIcon icon={faCamera} className="h-3 w-3" />
           </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/jpg,image/webp,image/gif"
+            className="hidden"
+            onChange={handleImageSelected}
+          />
         </div>
         <div>
           <h3 className="text-lg font-semibold text-gray-900">Profile Picture</h3>
-          <p className="text-sm text-gray-500">Click the camera icon to upload a new photo</p>
+          <p className="text-sm text-gray-500">
+            {newImageFile ? 'New image selected. Save profile to apply.' : 'Click the camera icon to upload a new photo'}
+          </p>
+          {imageError && <p className="text-xs text-red-600 mt-1">{imageError}</p>}
         </div>
       </div>
 
@@ -309,16 +623,96 @@ const Settings = ({ onBackToLanding }) => {
           />
           {errors.telephone && <p className="mt-1 text-sm text-red-600">{errors.telephone}</p>}
         </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Date of Birth</label>
+          <input
+            type="date"
+            value={userData.dateOfBirth}
+            onChange={(e) => handleUserDataChange('dateOfBirth', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-violet-500 focus:border-violet-500"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Gender</label>
+          <select
+            value={userData.gender}
+            onChange={(e) => handleUserDataChange('gender', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-violet-500 focus:border-violet-500"
+          >
+            <option value="">Select</option>
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+            <option value="nonbinary">Non-binary</option>
+            <option value="other">Other</option>
+            <option value="prefer_not_say">Prefer not to say</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Country</label>
+          <input
+            type="text"
+            value={userData.country}
+            onChange={(e) => handleUserDataChange('country', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-violet-500 focus:border-violet-500"
+            placeholder="Country"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Designation</label>
+          <input
+            type="text"
+            value={userData.designation}
+            onChange={(e) => handleUserDataChange('designation', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-violet-500 focus:border-violet-500"
+            placeholder="Job Title / Role"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Average Monthly Income</label>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={userData.averageMonthlyIncome}
+            onChange={(e) => handleUserDataChange('averageMonthlyIncome', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-violet-500 focus:border-violet-500"
+            placeholder="0.00"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-2">Civil Status</label>
+          <select
+            value={userData.civilStatus}
+            onChange={(e) => handleUserDataChange('civilStatus', e.target.value)}
+            className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-violet-500 focus:border-violet-500"
+          >
+            <option value="">Select</option>
+            <option value="single">Single</option>
+            <option value="married">Married</option>
+            <option value="widowed">Widowed</option>
+            <option value="divorced">Divorced</option>
+            <option value="separated">Separated</option>
+            <option value="other">Other</option>
+          </select>
+        </div>
       </div>
 
       <button
-        onClick={handleProfileUpdate}
-        disabled={isLoading}
+        onClick={saveProfileToBackend}
+        disabled={profileSaving}
         className="w-full md:w-auto px-6 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition duration-200"
       >
         <FontAwesomeIcon icon={faSave} className="mr-2" />
-        {isLoading ? 'Updating...' : 'Update Profile'}
+        {profileSaving ? 'Saving...' : 'Update Profile'}
       </button>
+
+      {backendError && <div className="mt-4 text-sm text-red-600">{backendError}</div>}
     </div>
   );
 
@@ -425,12 +819,15 @@ const Settings = ({ onBackToLanding }) => {
       </div>
 
       <button
-        onClick={handleSettingsUpdate}
+        onClick={saveSettingsToBackend}
+        disabled={settingsSaving}
         className="w-full md:w-auto px-6 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 transition duration-200"
       >
         <FontAwesomeIcon icon={faSave} className="mr-2" />
-        Save Preferences
+        {settingsSaving ? 'Saving...' : 'Save Preferences'}
       </button>
+
+      {backendError && <div className="mt-4 text-sm text-red-600">{backendError}</div>}
     </div>
   );
 
@@ -509,13 +906,15 @@ const Settings = ({ onBackToLanding }) => {
           </div>
 
           <button
-            onClick={handlePasswordUpdate}
-            disabled={isLoading}
+            onClick={updatePasswordBackend}
+            disabled={passwordSaving}
             className="w-full md:w-auto px-6 py-2 bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition duration-200"
           >
             <FontAwesomeIcon icon={faLock} className="mr-2" />
-            {isLoading ? 'Updating...' : 'Update Password'}
+            {passwordSaving ? 'Updating...' : 'Update Password'}
           </button>
+
+          {backendError && <div className="mt-4 text-sm text-red-600">{backendError}</div>}
         </div>
       </div>
 
@@ -530,7 +929,7 @@ const Settings = ({ onBackToLanding }) => {
                 Once you delete your account, there is no going back. All your data will be permanently removed.
               </p>
               <button
-                onClick={handleAccountDelete}
+                onClick={() => setShowDeleteModal(true)}
                 className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition duration-200"
               >
                 <FontAwesomeIcon icon={faTrash} className="mr-2" />
@@ -637,14 +1036,16 @@ const Settings = ({ onBackToLanding }) => {
             </p>
             <div className="flex space-x-4">
               <button
-                onClick={confirmAccountDelete}
-                className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 transition duration-200"
+                onClick={deleteAccountBackend}
+                disabled={deletingAccount}
+                className="flex-1 bg-red-600 text-white py-2 px-4 rounded-lg hover:bg-red-700 disabled:opacity-50 transition duration-200"
               >
-                Yes, Delete Account
+                {deletingAccount ? 'Deleting...' : 'Yes, Delete Account'}
               </button>
               <button
                 onClick={() => setShowDeleteModal(false)}
-                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 transition duration-200"
+                disabled={deletingAccount}
+                className="flex-1 bg-gray-300 text-gray-700 py-2 px-4 rounded-lg hover:bg-gray-400 disabled:opacity-50 transition duration-200"
               >
                 Cancel
               </button>

@@ -26,7 +26,7 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [transactions, setTransactions] = useState([]);
-  const [currency, setCurrency] = useState('₹');
+  const [currency, setCurrency] = useState(() => localStorage.getItem('selectedCurrency') || '$'); // lazy init from storage
   const [isFetching, setIsFetching] = useState(false);
   const [listType, setListType] = useState(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
@@ -38,15 +38,22 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
   const [showExpenseModal, setShowExpenseModal] = useState(false);
 
   useEffect(() => {
-    const savedCurrency = localStorage.getItem('selectedCurrency') || '₹';
-    setCurrency(savedCurrency);
-    
     setFormData(prev => ({
       ...prev,
       title: activeTab === 'income' ? 'Income' : 'Expenses',
       category: ''
     }));
   }, [activeTab]);
+
+  // ADDED: global settings update listener
+  useEffect(() => {
+    const onSettings = (e) => {
+      const cur = e.detail?.currency || localStorage.getItem('selectedCurrency') || '$'; // changed fallback
+      setCurrency(cur);
+    };
+    window.addEventListener('app:settings-updated', onSettings);
+    return () => window.removeEventListener('app:settings-updated', onSettings);
+  }, []);
 
   const incomeCategories = [
     'Salary',
@@ -84,6 +91,28 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
     }));
     if (errors[name]) {
       setErrors(prev => ({ ...prev, [name]: '' }));
+    }
+  };
+
+  const handleAmountInput = (e) => {
+    let v = e.target.value;
+    // Remove invalid chars
+    v = v.replace(/[^0-9.]/g, '');
+    // Keep only first dot
+    const firstDot = v.indexOf('.');
+    if (firstDot !== -1) {
+      const before = v.slice(0, firstDot + 1);
+      const after = v.slice(firstDot + 1).replace(/\./g, '');
+      v = before + after;
+    }
+    // Limit to 2 decimals
+    if (v.includes('.')) {
+      const [intPart, decPart] = v.split('.');
+      v = intPart + '.' + decPart.slice(0, 2);
+    }
+    setFormData(prev => ({ ...prev, amount: v }));
+    if (errors.amount) {
+      setErrors(prev => ({ ...prev, amount: '' }));
     }
   };
 
@@ -134,7 +163,13 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
 
       if (response.ok) {
         if (activeTab === 'expense') {
-          await updateBudgetSpentAmount(getUserId(), transactionData.category, transactionData.amount);
+          // CHANGED: pass transaction date
+            await updateBudgetSpentAmount(
+              getUserId(),
+              transactionData.category,
+              transactionData.amount,
+              transactionData.date
+            );
         }
 
         alert(`${formData.title} added successfully!`);
@@ -165,7 +200,15 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
     }
   };
 
-  const updateBudgetSpentAmount = async (userId, category, expenseAmount) => {
+  // NEW helper: check if a date is within inclusive ISO date range
+  const dateInRange = (iso, startISO, endISO) => {
+    if (!iso || !startISO || !endISO) return false;
+    const d = new Date(iso);
+    return d >= new Date(startISO) && d <= new Date(endISO);
+  };
+
+  // REPLACED previous single-budget updater with multi-budget logic
+  const updateBudgetSpentAmount = async (userId, category, expenseAmount, txDateISO) => {
     try {
       const budgetsResponse = await fetch(`http://localhost:5000/api/budgets/${userId}`, {
         method: 'GET',
@@ -175,57 +218,76 @@ const Transaction = ({ onBackToLanding, initialTab }) => {
         }
       });
 
-      if (budgetsResponse.ok) {
-        const budgetsData = await budgetsResponse.json();
-        const budgets = budgetsData.budgets || [];
+      if (!budgetsResponse.ok) {
+        console.error('Failed to fetch budgets for update');
+        return;
+      }
 
-        const matchingBudget = budgets.find(budget => 
-          budget.category === category || 
-          (category === 'Other Expenses' && budget.category === 'Other')
-        );
+      const budgetsData = await budgetsResponse.json();
+      const budgetsList = budgetsData.budgets || [];
 
-        if (matchingBudget) {
-          const updatedSpentAmount = (matchingBudget.spentAmount || 0) + expenseAmount;
+      // Match category (allow mapping "Other Expenses" -> "Other")
+      const normalizedCategory = category === 'Other Expenses' ? 'Other' : category;
 
-          const updateData = {
-            userId: userId,
-            category: matchingBudget.category,
-            budgetAmount: matchingBudget.budgetAmount,
-            period: matchingBudget.period,
-            startDate: matchingBudget.startDate,
-            endDate: matchingBudget.endDate,
+      // All budgets for same category AND transaction date inside their range
+      const applicableBudgets = budgetsList.filter(b =>
+        (b.category === normalizedCategory) &&
+        dateInRange(txDateISO, b.startDate, b.endDate)
+      );
+
+      if (applicableBudgets.length === 0) {
+        console.log(`No active budgets found for category: ${category} on ${txDateISO}`);
+        return;
+      }
+
+      const alertMessages = [];
+
+      // Update each applicable budget
+      for (const b of applicableBudgets) {
+        const updatedSpentAmount = (b.spentAmount || 0) + expenseAmount;
+
+        const updateData = {
+          userId,
+            category: b.category,
+            budgetAmount: b.budgetAmount,
+            period: b.period,
+            startDate: b.startDate,
+            endDate: b.endDate,
             spentAmount: updatedSpentAmount
-          };
+        };
 
-          const updateResponse = await fetch(`http://localhost:5000/api/budgets/${matchingBudget.id}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${localStorage.getItem('authToken')}`
-            },
-            body: JSON.stringify(updateData)
-          });
+        const putRes = await fetch(`http://localhost:5000/api/budgets/${b.id || b._id}`, {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${localStorage.getItem('authToken')}`
+          },
+          body: JSON.stringify(updateData)
+        });
 
-          if (updateResponse.ok) {
-            console.log(`Budget updated successfully for category: ${category}`);
-            
-            const percentage = (updatedSpentAmount / matchingBudget.budgetAmount) * 100;
-            if (percentage >= 100) {
-              alert(`⚠️ Budget Alert: You have exceeded your budget for ${category}! 
-Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchingBudget.budgetAmount.toFixed(2)}`);
-            } else if (percentage >= 80) {
-              alert(`⚠️ Budget Warning: You have used ${percentage.toFixed(1)}% of your budget for ${category}. 
-Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchingBudget.budgetAmount.toFixed(2)}`);
-            }
-          } else {
-            console.error('Failed to update budget spent amount');
-          }
-        } else {
-          console.log(`No budget found for category: ${category}`);
+        if (!putRes.ok) {
+          console.error(`Failed to update budget (${b.category}, ${b.period})`);
+          continue;
+        }
+
+        const pct = (updatedSpentAmount / b.budgetAmount) * 100;
+        if (pct >= 100) {
+          alertMessages.push(
+            `Over Budget: ${b.category} (${b.period})\nSpent: ${currency}${updatedSpentAmount.toFixed(2)} / ${currency}${b.budgetAmount.toFixed(2)} (${pct.toFixed(1)}%)`
+          );
+        } else if (pct >= 80) {
+          alertMessages.push(
+            `Warning: ${b.category} (${b.period}) ${pct.toFixed(1)}% used\nSpent: ${currency}${updatedSpentAmount.toFixed(2)} / ${currency}${b.budgetAmount.toFixed(2)}`
+          );
         }
       }
+
+      if (alertMessages.length > 0) {
+        // Single aggregated alert
+        alert(alertMessages.join('\n\n'));
+      }
     } catch (error) {
-      console.error('Error updating budget spent amount:', error);
+      console.error('Error updating multiple budgets:', error);
     }
   };
 
@@ -236,7 +298,7 @@ Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchi
 
   const formatAmount = (amount) => {
     const num = typeof amount === 'number' ? amount : Number(amount);
-    return isNaN(num) ? '0.00' : `${currency}${num.toFixed(2)}`;
+    return isNaN(num) ? `${currency}0.00` : `${currency}${num.toFixed(2)}`;
   };
 
   const getUserId = () => {
@@ -434,18 +496,18 @@ Spent: ${currency}${updatedSpentAmount.toFixed(2)} / Budget: ${currency}${matchi
                     Amount *
                   </label>
                   <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <FontAwesomeIcon icon={faDollarSign} className="h-5 w-5 text-gray-400" />
-                    </div>
+                    <span className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <span className="text-gray-500 font-semibold">{currency}</span>
+                    </span>
                     <input
                       id="amount"
                       name="amount"
-                      type="number"
-                      step="0.01"
-                      min="0"
+                      type="text"
+                      inputMode="decimal"
+                      autoComplete="off"
                       value={formData.amount}
-                      onChange={handleChange}
-                      className={`w-full pl-10 pr-4 py-3 border ${
+                      onChange={handleAmountInput}
+                      className={`w-full pl-9 pr-4 py-3 border ${
                         errors.amount ? 'border-red-500' : 'border-gray-300'
                       } rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500 focus:border-violet-500`}
                       placeholder="0.00"

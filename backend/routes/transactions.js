@@ -3,6 +3,7 @@ const router = express.Router();
 const Transaction = require('../models/Transaction');
 const mongoose = require('mongoose');
 const authMiddleware = require('../middleware/auth');
+const { handleTransactionNotifications } = require('../services/notificationService'); // added
 
 // @route   GET /api/transactions
 // @desc    Get all transactions for logged in user
@@ -152,6 +153,8 @@ router.post('/', authMiddleware, async (req, res) => {
     // Populate the transaction before sending response
     await transaction.populate('category', 'name type color icon');
     await transaction.populate('user', 'name email');
+    // Notification hook (non-blocking best-effort)
+    handleTransactionNotifications(transaction).catch(err => console.error('Notif tx error', err));
 
     res.status(201).json({
       success: true,

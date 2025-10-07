@@ -22,6 +22,7 @@ const LandingPage = ({ onLogout }) => {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState('dashboard');
   const [activeTransactionTab, setActiveTransactionTab] = useState('income');
+  const [currency, setCurrency] = useState(() => localStorage.getItem('selectedCurrency') || '$'); // changed: lazy init from storage
 
   useEffect(() => {
     // Get user data from localStorage
@@ -29,6 +30,12 @@ const LandingPage = ({ onLogout }) => {
     if (storedUserData) {
       setUserData(JSON.parse(storedUserData));
     }
+
+    const cur = localStorage.getItem('selectedCurrency') || '$';
+    setCurrency(cur);
+    const h = (e) => setCurrency(e.detail?.currency || localStorage.getItem('selectedCurrency') || '$');
+    window.addEventListener('app:settings-updated', h);
+    return () => window.removeEventListener('app:settings-updated', h);
   }, []);
 
   const handleLogout = () => {
@@ -220,7 +227,7 @@ const LandingPage = ({ onLogout }) => {
                       Total Balance
                     </dt>
                     <dd className="text-lg md:text-xl lg:text-2xl font-bold text-gray-900 mt-1">
-                      $12,345.67
+                      {currency}12,345.67
                     </dd>
                   </dl>
                 </div>
@@ -241,7 +248,7 @@ const LandingPage = ({ onLogout }) => {
                       Monthly Income
                     </dt>
                     <dd className="text-lg md:text-xl lg:text-2xl font-bold text-gray-900 mt-1">
-                      $5,420.00
+                      {currency}5,420.00
                     </dd>
                   </dl>
                 </div>
@@ -262,7 +269,7 @@ const LandingPage = ({ onLogout }) => {
                       Monthly Expenses
                     </dt>
                     <dd className="text-lg md:text-xl lg:text-2xl font-bold text-gray-900 mt-1">
-                      $2,840.35
+                      {currency}2,840.35
                     </dd>
                   </dl>
                 </div>
