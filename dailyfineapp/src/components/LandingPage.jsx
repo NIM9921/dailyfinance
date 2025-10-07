@@ -17,6 +17,8 @@ import Report from './Report';
 import Settings from './Settings';
 import Notifications from './Notifications';
 
+const API_BASE = 'http://localhost:5000';
+
 const LandingPage = ({ onLogout }) => {
   const [userData, setUserData] = useState(null);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -58,20 +60,75 @@ const LandingPage = ({ onLogout }) => {
     }
   };
 
-  useEffect(() => {
-    // Get user data from localStorage
-    const storedUserData = localStorage.getItem('userData');
-    if (storedUserData) {
-      setUserData(JSON.parse(storedUserData));
-    }
+  const extractUserFromStored = (raw) => {
+    if (!raw) return null;
+    try {
+      const obj = JSON.parse(raw);
+      if (obj.name) return { id: obj.id || obj._id, ...obj };
+      if (obj.data?.name) return { id: obj.data.id, ...obj.data };
+      if (obj.user?.name) return { id: obj.user.id || obj.user._id, ...obj.user };
+    } catch { /* ignore */ }
+    return null;
+  };
 
+  const decodeTokenUserId = () => {
+    const tok = localStorage.getItem('authToken');
+    if (!tok) return null;
+    try {
+      const payload = JSON.parse(atob(tok.split('.')[1]));
+      return payload.userId || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const fetchUserProfile = async (uid) => {
+    if (!uid) return;
+    try {
+      const res = await fetch(`${API_BASE}/api/users/${uid}`, {
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('authToken') || ''}`
+        }
+      });
+      if (!res.ok) return;
+      const data = await res.json().catch(() => null);
+      const profile = data?.user || data;
+      if (profile?.name) {
+        setUserData({
+          id: profile.id || profile._id || uid,
+          name: profile.name,
+          email: profile.email,
+          telephone: profile.telephone
+        });
+      }
+    } catch { /* ignore */ }
+  };
+
+  const hydrateUser = async () => {
+    const parsed = extractUserFromStored(localStorage.getItem('userData'));
+    if (parsed?.name) {
+      setUserData(parsed);
+      return;
+    }
+    await fetchUserProfile(parsed?.id || decodeTokenUserId());
+  };
+
+  useEffect(() => {
+    hydrateUser();
     const cur = localStorage.getItem('selectedCurrency') || '$';
     setCurrency(cur);
-    const h = (e) => setCurrency(e.detail?.currency || localStorage.getItem('selectedCurrency') || '$');
+    const h = (e) =>
+      setCurrency(e.detail?.currency || localStorage.getItem('selectedCurrency') || '$');
     window.addEventListener('app:settings-updated', h);
+    const onStorage = (e) => {
+      if (e.key === 'userData') hydrateUser();
+    };
+    window.addEventListener('storage', onStorage);
     fetchMonthlySummary(); // NEW
     return () => {
       window.removeEventListener('app:settings-updated', h);
+      window.removeEventListener('storage', onStorage);
     };
   }, []);
 
