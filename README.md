@@ -65,26 +65,52 @@ List any environment variables your app needs (example):
 - PORT - server port (default 5000)
 - REACT_APP_API_URL - base URL for API on the client
 
-## Screenshots / App image
-To add a picture of the app for the related area, add the image file to the repository (recommended places):
+## Screenshots
+Below are screenshots for the main areas of the app. These images are hosted on Cloudinary (provided).
 
-- client/public/images/app-screenshot.png  (for Create React App public assets)
-- docs/images/app-screenshot.png
-- README folder like /assets or /images at the repository root
+- Main dashboard
 
-Then reference it in this README with Markdown, for example:
+  ![DailyFinance - Main Dashboard](https://res.cloudinary.com/ddko1nsop/image/upload/v1764044800/Screenshot_2025-11-25_095544_pltgmx.png)
 
-   ![DailyFinance - Dashboard](./client/public/images/app-screenshot.png)
+  Suggested local path: client/public/images/dashboard.png or docs/images/dashboard.png
 
-Or if you place it in docs/images:
+- Add Income (Transaction)
 
-   ![DailyFinance - Transactions](./docs/images/transactions.png)
+  ![Add Income - Transaction](https://res.cloudinary.com/ddko1nsop/image/upload/v1764045318/add_income_c5zzzr.png)
 
-If you prefer to keep images in a remote location, you can link directly to an image URL: 
+  Suggested local path: client/public/images/add_income.png
 
-   ![App image](https://example.com/path/to/image.png)
+- Add Expenses (Transaction)
 
-Notes: GitHub will render images placed in the repository once pushed. If using client/public, files will also be served by React dev server.
+  ![Add Expenses - Transaction](https://res.cloudinary.com/ddko1nsop/image/upload/v1764045318/add_expences_v9chkf.png)
+
+  Suggested local path: client/public/images/add_expenses.png
+
+- Set Budget
+
+  ![Set Budget](https://res.cloudinary.com/ddko1nsop/image/upload/v1764045319/set_budget_p1qxgw.png)
+
+  Suggested local path: client/public/images/set_budget.png
+
+- Reports
+
+  ![Reports](https://res.cloudinary.com/ddko1nsop/image/upload/v1764045318/report_gkncer.png)
+
+  Suggested local path: client/public/images/reports.png
+
+- Settings
+
+  ![Settings](https://res.cloudinary.com/ddko1nsop/image/upload/v1764045318/settings_i7qcod.png)
+
+  Suggested local path: client/public/images/settings.png
+
+- Mobile / Responsive
+
+  The app is mobile responsive and works well on phones and small screens. Example mobile layout:
+
+  ![Mobile Responsive - DailyFinance](https://res.cloudinary.com/ddko1nsop/image/upload/v1764046198/mobile_responsive_gnwwtx.png)
+
+  Suggested local path: client/public/images/mobile_responsive.png
 
 ## Contributing
 Contributions are welcome. Please open an issue or PR with a clear description of changes and tests where applicable.
